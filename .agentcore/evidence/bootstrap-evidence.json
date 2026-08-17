@@ -75,7 +75,7 @@
     "arabold": {"ok":false,"error":"MCP SSE probe returned 404 from openai.org"},
     "fallback": "current official primary Android/Gradle documentation only",
     "index_path": ".agentcore/docs/DOCS_INDEX.md",
-    "external_state_doc_edit": {"ok":false,"error":"documentation maintainer process did not inherit OPENROUTER_CODEX_API_KEY; stale Flutter terminology recorded in authority map"}
+    "external_state_doc_edit": {"ok":false,"first_attempt":"documentation maintainer process did not inherit OPENROUTER_CODEX_API_KEY","second_attempt":"fresh keyed documentation maintainer returned Changed=false and wrote nothing","result":"stale Flutter terminology recorded with authority precedence; external file unchanged"}
   },
   "upstream_governance_gap": "Root Agent Rules Template heading/content not discoverable in MASTER_CONFIG_AND_PROMPT.md; project-specific seed is operator-authorized but template parity is not claimed"
 }

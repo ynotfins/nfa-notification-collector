@@ -33,7 +33,7 @@ Attach these because they are outside the three project roots:
 
 The downloaded product goal has already been preserved in this repository and does not need to be attached again.
 
-Known terminology drift: the current `DATABASE_STATE.md` says “Flutter collector” in one sentence. The durable `DATABASE.md`, active operator goal, and live architecture require **Android collector and application clients use the ingest gateway, never direct PostgreSQL**. A governed terminology edit was attempted, but this task's documentation-maintainer process had not inherited `OPENROUTER_CODEX_API_KEY`; the external file remains unchanged. Treat the wording as stale terminology, not permission to use Flutter or direct DB access.
+Known terminology drift: the current `DATABASE_STATE.md` says “Flutter collector” in one sentence. The durable `DATABASE.md`, active operator goal, and live architecture require **Android collector and application clients use the ingest gateway, never direct PostgreSQL**. The first governed edit attempt lacked the inherited worker key; a fresh keyed documentation-maintainer attempt later returned `Changed=false` and wrote nothing. The external file therefore remains unchanged. Treat the wording as stale terminology, not permission to use Flutter or direct DB access.
 
 ## Legacy implementation evidence
 
