@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "policy": "Append observable worker outcomes only. Record assignment, evidence, containment and routing adjustment; never include secrets or captured notification content.",
+  "entry_schema": {
+    "id": "stable unique string",
+    "observed_at_utc": "ISO-8601 UTC timestamp",
+    "worker_route": "agent/task/model or tool route",
+    "bounded_assignment": "authorized outcome and exclusions",
+    "expected_outcome": "observable success contract",
+    "observed_outcome": "evidence-backed result",
+    "evidence_refs": ["non-secret file, command, test or review references"],
+    "classification": "stall | drift | hallucination | protocol_failure | strong_review | strong_implementation",
+    "containment": "action taken to prevent impact",
+    "routing_adjustment": "future routing/prompt/review change",
+    "status": "open | monitored | resolved"
+  },
+  "excluded_data": [
+    "bearer or database credentials",
+    "captured notification content",
+    "private device identifiers beyond approved non-secret IDs",
+    "hidden reasoning"
+  ],
+  "entries": [
+    {
+      "id": "2026-08-17-workspace-audit",
+      "observed_at_utc": "2026-08-17T21:25:55.1654545Z",
+      "worker_route": "collector_workspace_audit collaboration agent",
+      "bounded_assignment": "read-only target, legacy Android, toolchain and ADB audit",
+      "expected_outcome": "exact paths/versions/conflicts/device evidence without mutation",
+      "observed_outcome": "returned target safety, package availability evidence, six legacy roots, SDK/JDK/ADB inventory and no-device blocker",
+      "evidence_refs": [".agentcore/evidence/workspace-audit-2026-08-17.json"],
+      "classification": "strong_review",
+      "containment": "not applicable",
+      "routing_adjustment": "prefer for future read-only Android/toolchain reconstruction",
+      "status": "resolved"
+    },
+    {
+      "id": "2026-08-17-server-contract-audit",
+      "observed_at_utc": "2026-08-17T21:25:55.1654545Z",
+      "worker_route": "collector_server_contract collaboration agent",
+      "bounded_assignment": "read-only live gateway/database compatibility audit",
+      "expected_outcome": "exact Android wire/permission constraints and conflicts",
+      "observed_outcome": "identified BNN-only source, exact limits/statuses/credential boundary, multi-source amendment and no DB change for first BNN build",
+      "evidence_refs": [".agentcore/evidence/server-contract-audit-2026-08-17.json"],
+      "classification": "strong_review",
+      "containment": "not applicable",
+      "routing_adjustment": "prefer for future server-contract boundary audits",
+      "status": "resolved"
+    },
+    {
+      "id": "2026-08-17-bootstrap-package-review",
+      "observed_at_utc": "2026-08-17T21:49:00Z",
+      "worker_route": "collector_package_review collaboration agent",
+      "bounded_assignment": "independent bootstrap documentation/governance review",
+      "expected_outcome": "find authority, M0, secret, path and prompt drift",
+      "observed_outcome": "found checklist/template/evidence/stop-gate/documentation gaps across three fix rounds and then returned ACCEPT after replaying deterministic scans",
+      "evidence_refs": ["collaboration review transcript",".agentcore/evidence/package-id-scan-2026-08-17.json"],
+      "classification": "strong_review",
+      "containment": "commits blocked until final ACCEPT",
+      "routing_adjustment": "retain as governance reviewer; require exact policy-shape checks early",
+      "status": "resolved"
+    },
+    {
+      "id": "2026-08-17-documentation-guard-retries",
+      "observed_at_utc": "2026-08-17T21:51:00Z",
+      "worker_route": "documentation_guard_worker / DeepSeek V4 Pro",
+      "bounded_assignment": "guard actual bootstrap Markdown package",
+      "expected_outcome": "findings and BLOCK/REVISE/ACCEPT",
+      "observed_outcome": "first full-package request timed out at 60 seconds; second exhausted 6000 tokens in reasoning; bounded authority packet with 300-second timeout and 10000-token budget returned ACCEPT",
+      "evidence_refs": [".agentcore/evidence/documentation-guard-2026-08-17.json"],
+      "classification": "protocol_failure",
+      "containment": "no commit before successful guard; reduced context and increased explicit timeout/budget",
+      "routing_adjustment": "use bounded authority packet plus at least 10000 tokens/300 seconds for large documentation guards",
+      "status": "resolved"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "captured_at_utc": "2026-08-17T21:51:00Z",
+  "guard": "documentation_guard_worker",
+  "model_route": "deepseek/deepseek-v4-pro",
+  "provider_model": "deepseek/deepseek-v4-pro",
+  "scope": "actual bootstrap Markdown package excluding verbatim operator input",
+  "writer_role": "Codex authority maintainer performing operator-requested new-project bootstrap",
+  "write_authorization": "active operator request to create and populate D:\\github\\nfa-notification-collector",
+  "verdict": "ACCEPT",
+  "findings": [
+    {"severity":"informational","finding":"Plan-mode design/spec is absent because M0 remains in progress","action":"create in the new Plan-mode task; no bootstrap documentation change required"},
+    {"severity":"none","finding":"No authority drift, write-boundary conflict, secret/database exposure, BNN/multi-source contradiction, readiness overclaim, stale pin, or M0 semantic defect"},
+    {"severity":"trivial","finding":"External DATABASE_STATE Flutter terminology drift is already documented with correct precedence"}
+  ],
+  "pending_nondefects": ["Arabold retry","signed AgentCore memory session","Plan-mode design and implementation plan"],
+  "source": "direct fresh cheap-worker MCP call with 300000 ms timeout and actual file contents",
+  "usage": {"prompt_tokens":15497,"completion_tokens":5729,"total_tokens":21226}
+}

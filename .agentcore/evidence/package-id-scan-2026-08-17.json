@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-17T21:45:09.1494867+00:00",
+  "search_root": "D:\\github",
+  "excluded_repository": "D:\\github\\nfa-notification-collector",
+  "package_id": "com.nfaalerts.collector",
+  "discovery_depth": 3,
+  "repositories_scanned": 78,
+  "fallback_repositories": [
+    "D:\\github\\agency-agents",
+    "D:\\github\\browser_warmer",
+    "D:\\github\\multilogin-warmup"
+  ],
+  "tracked_files_scanned": 104227,
+  "matches": [],
+  "errors": [],
+  "available": true
+}

@@ -1,0 +1,18 @@
+{
+  "captured_at_utc": "2026-08-17T21:25:55.1654545Z",
+  "scope": "read-only D:\\nfa-alerts-database source/tests, D:\\NFA-Database-Control\\DATABASE_STATE.md and D:\\github\\nfa-platform\\DATABASE.md",
+  "third_workspace_folder": "D:\\nfa-alerts-database",
+  "route": "POST /v1/ingest/alerts",
+  "local_url": "http://127.0.0.1:8787/v1/ingest/alerts",
+  "expected_phone_url": "https://chaoscentral.tailb71e7e.ts.net/v1/ingest/alerts",
+  "phone_tailscale_ready": false,
+  "device_id": "nfa-primary-phone",
+  "source_contract": "bnn_only",
+  "limits": {"body_bytes":262144,"raw_text_utf8_bytes":131072,"metadata_utf8_bytes":32768,"metadata_depth":6,"total_keys":128,"keys_per_object":64,"array_entries":128,"metadata_string_utf8_bytes":8192,"burst":240,"refill_per_minute":120},
+  "android_database_access_required": false,
+  "database_role_or_permission_change_required_for_bnn": false,
+  "active_primary_credential": true,
+  "multi_source_requires_separate_approval": true,
+  "source_event": "collaboration task /root/collector_server_contract final answer in the bootstrap task",
+  "result": "accepted_as_read_only_evidence"
+}

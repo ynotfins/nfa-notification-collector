@@ -1,0 +1,17 @@
+{
+  "captured_at_utc": "2026-08-17T21:25:55.1654545Z",
+  "scope": "read-only target, D:\\github package-ID/listener evidence, Android toolchain and ADB",
+  "target": {"path":"D:\\github\\nfa-notification-collector","initial_items":["desktop.ini"],"git_before_bootstrap":false,"unrelated_work":false},
+  "package_id": {"candidate":"com.nfaalerts.collector","source_control_conflict_found":false,"scan_exclusions":[".git","node_modules","build","cache","virtual environments"]},
+  "legacy_roots": [
+    {"path":"D:\\github\\android-alerts","role":"historical BNN/listener evidence","bnn_candidate":"us.bnn.newsapp"},
+    {"path":"D:\\github\\alerts-sheets\\android","role":"historical listener evidence"},
+    {"path":"D:\\github\\alert-collector\\alerts-sheets\\android","role":"duplicate package historical evidence"},
+    {"path":"D:\\github\\notification-database","role":"independent notification journal evidence"},
+    {"path":"D:\\github\\Alert Tracker\\android","role":"conflicting-build historical evidence"},
+    {"path":"D:\\github\\nfa_android\\android-native","role":"not an equivalent notification-listener implementation"}
+  ],
+  "toolchain": {"sdk":"C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk","sdk_adb":"37.0.0-14910828","connected_devices":0,"java_home":"Temurin 17.0.16","path_java":"Temurin 21.0.11","cached_gradle":["8.7","8.9","9.3.1","9.4.1"]},
+  "source_event": "collaboration task /root/collector_workspace_audit final answer in the bootstrap task",
+  "result": "accepted_as_read_only_evidence"
+}

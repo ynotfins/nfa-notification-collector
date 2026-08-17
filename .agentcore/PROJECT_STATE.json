@@ -1,0 +1,29 @@
+{
+  "$schema_note": "Bootstrap seed only. After first governed projection, projection-worker owns this file; ordinary agents must not hand edit it.",
+  "project_id": "nfa-notification-collector",
+  "status": "bootstrap",
+  "current_milestone": "M0",
+  "last_updated": "2026-08-17T21:25:55.1654545Z",
+  "worktree": "D:\\github\\nfa-notification-collector",
+  "blockers": [
+    "Plan-mode design and operator approval pending",
+    "Arabold Docs returned SSE 404 and requires retry",
+    "AgentCore memory requires signed device assertion in the new task",
+    "No Samsung device connected",
+    "Tailscale phone endpoint not live-verified",
+    "Multi-source server contract requires approval before second-source transport"
+  ],
+  "recent_decisions": [
+    "Third workspace folder is D:\\nfa-alerts-database",
+    "Collector repository is the only normal write root",
+    "BNN/source=bnn is first live compatibility milestone",
+    "Non-BNN captures remain local BLOCKED_CONTRACT before approval",
+    "Full envelope is local; bounded projection is transmitted"
+  ],
+  "decisions_log_path": ".agentcore/DECISIONS.md",
+  "risk_register_path": ".agentcore/RISK_REGISTER.md",
+  "acceptance_tests_path": ".agentcore/ACCEPTANCE_TESTS.md",
+  "checklist_state_path": ".agentcore/checklists/state.json",
+  "reading_log": [],
+  "checkpoints": {"context_fabric":null,"arabold_docs":null,"memory_handoff":null,"tool_audit":null}
+}

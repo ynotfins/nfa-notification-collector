@@ -1,0 +1,80 @@
+{
+  "captured_at_utc": "2026-08-17T21:25:55.1654545Z",
+  "project": {
+    "project_key": "nfa-notification-collector",
+    "project_root": "D:\\github\\nfa-notification-collector",
+    "enrollment_commit": "2b13bdc",
+    "enrollment_review": "ACCEPT",
+    "initial_target_items": ["desktop.ini"],
+    "git_branch": "main",
+    "git_head_before_bootstrap_commit": null,
+    "git_remote": null
+  },
+  "product_input": {
+    "source_path": "C:\\Users\\ynotf\\Downloads\\Codex Goal — Build NFA Android Notification Collector.md",
+    "repository_path": "docs/input/OPERATOR_PRODUCT_GOAL_2026-08-17.md",
+    "sha256": "24D5D5D9271B9DECFFCAFE79FAD90A179C0EBE0F067FED426B445B6C57178DE6",
+    "copy_hash_matches": true
+  },
+  "commands": [
+    {"command":"git --version","result":"git version 2.51.1.windows.1"},
+    {"command":"git branch --show-current","working_directory":"D:\\github\\nfa-notification-collector","result":"main"},
+    {"command":"git status --short","working_directory":"D:\\github\\nfa-notification-collector","result":"new untracked bootstrap package before restore commit"},
+    {"command":"git check-ignore desktop.ini","working_directory":"D:\\github\\nfa-notification-collector","result":"desktop.ini"},
+    {"command":"Get-FileHash -LiteralPath 'C:\\Users\\ynotf\\Downloads\\Codex Goal — Build NFA Android Notification Collector.md' -Algorithm SHA256; Get-FileHash -LiteralPath 'D:\\github\\nfa-notification-collector\\docs\\input\\OPERATOR_PRODUCT_GOAL_2026-08-17.md' -Algorithm SHA256","result":"both 24D5D5D9271B9DECFFCAFE79FAD90A179C0EBE0F067FED426B445B6C57178DE6"},
+    {"command":"pwsh -NoProfile -NonInteractive -File D:\\github\\nfa-notification-collector\\scripts\\Verify-PackageIdAvailability.ps1","result_ref":".agentcore/evidence/package-id-scan-2026-08-17.json"},
+    {"command":"C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe version","result_ref":"android_sdk.adb_build"},
+    {"command":"C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe devices -l","result":"List of devices attached; zero device rows"},
+    {"command":"python -c \"from scripts.agentcore_project_boundary import require_enrolled_path; import json; print(json.dumps(require_enrolled_path(r'D:\\\\github\\\\nfa-notification-collector'), sort_keys=True))\"","working_directory":"D:\\github\\agentcore-control-plane","result":"project_key/path exact"},
+    {"command":"Get-ScheduledTask -TaskPath '\\NFA\\' -TaskName 'AlertsIngestGateway'","result_ref":"gateway.task"},
+    {"command":"netstat -ano | Select-String '127\\.0\\.0\\.1:8787\\s+.*LISTENING'","result_ref":"gateway.listener"},
+    {"command":"agentcore-memory session_open","result_ref":"agentcore_memory"},
+    {"command":"Arabold Docs list_libraries","result_ref":"documentation.arabold"}
+  ],
+  "scan_scope": {
+    "package_id_search": "78 D:\\github repositories; 104227 tracked files plus bounded raw fallback for three repositories with unusable Git metadata; excluded target, .git, node_modules, build, .gradle, venv, vendor, dist, out and desktop.ini",
+    "target_inventory": "D:\\github\\nfa-notification-collector including hidden items",
+    "legacy_listener_roots": [
+      "D:\\github\\android-alerts",
+      "D:\\github\\alerts-sheets\\android",
+      "D:\\github\\alert-collector\\alerts-sheets\\android",
+      "D:\\github\\notification-database",
+      "D:\\github\\Alert Tracker\\android",
+      "D:\\github\\nfa_android\\android-native"
+    ],
+    "package_id_conflict_found": false,
+    "package_id_scan_evidence": ".agentcore/evidence/package-id-scan-2026-08-17.json"
+  },
+  "android_sdk": {
+    "root": "C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk",
+    "platforms": ["android-30","android-33","android-34","android-35","android-36","android-36.1"],
+    "build_tools": ["30.0.3","34.0.0","35.0.0","36.0.0"],
+    "adb_path": "C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+    "adb_build": [
+      "Android Debug Bridge version 1.0.41",
+      "Version 37.0.0-14910828",
+      "Installed as C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+      "Running on Windows 10.0.26200"
+    ],
+    "connected_devices": 0,
+    "java_home": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.16.8-hotspot",
+    "path_java": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.11.10-hotspot\\bin\\java.exe",
+    "cached_gradle_distributions": ["8.7","8.9","9.3.1","9.4.1"]
+  },
+  "gateway": {
+    "task": {"path":"\\NFA\\AlertsIngestGateway","exists":true,"state":"Running"},
+    "listener": {"address":"127.0.0.1","port":8787,"state":"LISTENING","pid_at_capture":69952},
+    "local_status": "healthy",
+    "phone_tailscale_status": "not_live_verified",
+    "source_contract": "bnn_only",
+    "database_adjustment": "none_required_for_first_bnn_build"
+  },
+  "agentcore_memory": {"ok":false,"error":"device_assertion_required","identity_verified":false},
+  "documentation": {
+    "arabold": {"ok":false,"error":"MCP SSE probe returned 404 from openai.org"},
+    "fallback": "current official primary Android/Gradle documentation only",
+    "index_path": ".agentcore/docs/DOCS_INDEX.md",
+    "external_state_doc_edit": {"ok":false,"error":"documentation maintainer process did not inherit OPENROUTER_CODEX_API_KEY; stale Flutter terminology recorded in authority map"}
+  },
+  "upstream_governance_gap": "Root Agent Rules Template heading/content not discoverable in MASTER_CONFIG_AND_PROMPT.md; project-specific seed is operator-authorized but template parity is not claimed"
+}

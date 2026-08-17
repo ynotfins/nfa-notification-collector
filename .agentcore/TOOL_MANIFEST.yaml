@@ -1,0 +1,60 @@
+project_id: nfa-notification-collector
+repo_id: nfa-notification-collector
+worktree_id: canonical
+active_milestone_id: M0
+assigned_identities: [codex]
+base_profile: bootstrap
+
+core_active:
+  - agentcore-memory
+  - native-filesystem
+  - native-git
+milestone_active:
+  - sequential-thinking
+  - arabold-docs
+  - official-web-docs-fallback
+  - context-fabric-local
+  - depwire-local-explicit-cwd
+  - android-sdk-readonly
+  - adb-readonly
+jit_leased: []
+dormant:
+  - android-build
+  - adb-install
+  - playwright
+  - emulator
+  - database-validator
+  - gateway-live-test
+operator_only:
+  - notification-access-grant
+  - bearer-entry
+  - battery-settings
+  - signing-secret
+  - permanent-server-contract-change
+forbidden:
+  - direct-postgresql-from-android
+  - raw-pgdata-access
+  - trust-all-tls
+  - accessibility-service-substitute
+  - tailscale-funnel
+  - crm
+  - swarm-tools
+
+activation_reasons:
+  agentcore-memory: governed continuity for exact enrolled project
+  sequential-thinking: architecture and milestone plan
+  arabold-docs: version-sensitive Android dependencies and APIs
+  official-web-docs-fallback: only after Arabold failure is recorded
+  context-fabric-local: M0 entry/exit drift evidence
+  depwire-local-explicit-cwd: structural plan/build evidence
+  android-sdk-readonly: installed toolchain inventory
+  adb-readonly: device discovery only when connected
+
+expiry_conditions:
+  official-web-docs-fallback: Arabold becomes healthy or M0 closes
+  adb-readonly: device inventory step completes
+
+last_audit: null
+next_required_audit: M0-exit
+policy_revision: "2026-08-17"
+runtime_lease_enforcement: live
