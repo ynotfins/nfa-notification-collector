@@ -8,6 +8,7 @@
     "initial_target_items": ["desktop.ini"],
     "git_branch": "main",
     "git_head_before_bootstrap_commit": null,
+    "git_head_after_bootstrap_commit": "b129e9c",
     "git_remote": null
   },
   "product_input": {

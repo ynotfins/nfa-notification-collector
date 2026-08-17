@@ -62,7 +62,7 @@ This table projects only canonical `id`, `action`, and `status` from `.agentcore
 | M0.A3.m2 | Write and independently review design and detailed TDD plan | pending |
 | M0.A3.m3 | Obtain operator approval for written plan | pending |
 | M0.A3.m4 | Run M0 tool audit | pending |
-| M0.A3.m5 | Create clean local bootstrap restore commit | pending |
+| M0.A3.m5 | Create clean local bootstrap restore commit | passed |
 | M0.A3.m6 | Run M0 acceptance gate and build handoff | pending |
 
 ## Checkpoints

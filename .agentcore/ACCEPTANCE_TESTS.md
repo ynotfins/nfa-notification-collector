@@ -2,7 +2,7 @@
 
 | ID | Milestone | Description | Expected evidence | Status | Evidence path |
 |---|---|---|---|---|---|
-| AT-M0-1 | M0 | Exact enrollment/root/Git and governance validate | boundary/Git/schema outputs | pending | |
+| AT-M0-1 | M0 | Exact enrollment/root/Git and governance validate | boundary/Git/schema outputs | passed | enrollment commit `2b13bdc`; bootstrap commit `b129e9c`; `.agentcore/evidence/bootstrap-evidence.json` |
 | AT-M0-2 | M0 | Operator request/product input preserved and classified | hash + authority review | passed | `.agentcore/evidence/bootstrap-evidence.json`; `.agentcore/evidence/documentation-guard-2026-08-17.json` |
 | AT-M0-3 | M0 | Official dependency/API docs checkpoint | Arabold success or recorded failure plus dated official-primary sources | pending | `.agentcore/docs/DOCS_INDEX.md` |
 | AT-M0-4 | M0 | Design/spec and detailed plan independently accepted | review + operator approval | pending | |
