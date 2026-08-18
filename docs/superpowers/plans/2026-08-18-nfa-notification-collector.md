@@ -115,9 +115,9 @@
 ## Standard verification commands
 
 ```powershell
-.\scripts\Invoke-GradleJdk17.ps1 -Tasks @("--version")
-.\scripts\Invoke-GradleJdk17.ps1 -Tasks @("ktlintCheck","testDebugUnitTest","lintDebug","assembleDebug")
-.\scripts\Invoke-GradleJdk17.ps1 -Tasks @("clean","ktlintCheck","testDebugUnitTest","lintDebug","connectedDebugAndroidTest","assembleDebug","dependencies")
+.\scripts\Invoke-GradleJdk17.ps1 --version
+.\scripts\Invoke-GradleJdk17.ps1 ktlintCheck testDebugUnitTest lintDebug assembleDebug
+.\scripts\Invoke-GradleJdk17.ps1 clean ktlintCheck testDebugUnitTest lintDebug connectedDebugAndroidTest assembleDebug dependencies
 & .\scripts\Test-RepositoryHygiene.ps1
 if ($LASTEXITCODE -ne 0) { throw "Repository hygiene gate failed with exit code $LASTEXITCODE" }
 npm test  # from D:\nfa-alerts-database\gateway, read-only

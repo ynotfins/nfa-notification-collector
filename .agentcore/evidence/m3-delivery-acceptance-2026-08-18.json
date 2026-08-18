@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-18T17:23:07.6160132Z",
+  "milestone": "M3",
+  "status": "passed",
+  "project_key": "nfa-notification-collector",
+  "commits": [
+    "03e5f5dcf44adaa0dd436cfe75c5e1a3c136f83b",
+    "a316a1ab55537b84c4b5e10118c476ea9c57793b",
+    "22a4786e34d766bf2eb17d192b96c21d7844e20f",
+    "8d1488ea2d38882a391f2e541fe2d6d3fa8909a0"
+  ],
+  "verification": {
+    "jvm_tests": {"total": 99, "failed": 0, "errors": 0, "skipped": 0},
+    "api36_instrumentation": {"total": 38, "failed": 0, "skipped": 0},
+    "ktlint": "PASS",
+    "android_lint": "NO_ISSUES",
+    "debug_assemble": "PASS",
+    "repository_hygiene": "PASS",
+    "depwire_security": {"files": 58, "findings": 0},
+    "room_schemas": [1, 2],
+    "room_v2_identity_hash": "9112d5e0e85f712b8f9734a72259505c"
+  },
+  "emulator": {
+    "avd": "Pixel_8_API_36",
+    "android_release": "16",
+    "api": 36,
+    "tests": 38,
+    "stopped_after_test": true
+  },
+  "security": {
+    "keystore_algorithm": "AES-256-GCM",
+    "aad_bound": true,
+    "user_auth_required": false,
+    "ciphertext_location": "noBackupFilesDir",
+    "config_max_bytes": 1048576,
+    "response_max_bytes": 65536,
+    "bearer_shape_rejected_from_config_and_diagnostics": true,
+    "cleartext_or_redirect_delivery_allowed": false,
+    "direct_diagnostic_dao_write_exposed": false
+  },
+  "delivery": {
+    "schema_version": 1,
+    "source": "bnn",
+    "only_success_status": 202,
+    "initial_backoff_ms": 30000,
+    "maximum_backoff_ms": 21600000,
+    "transient_attempt_limit": null,
+    "database_due_time_authority": true,
+    "workmanager_backoff_used": false,
+    "response_loss_duplicates_accepted": true
+  },
+  "review": {
+    "initial_spec_verdict": "REJECTED",
+    "initial_quality_verdict": "REJECTED",
+    "fix_rounds": 3,
+    "final_spec_verdict": "APPROVED",
+    "final_quality_verdict": "APPROVED"
+  },
+  "generated_debug_apk": {
+    "path": "D:\\github\\nfa-notification-collector\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
+    "sha256_at_capture": "A23C4EDA4B7E6608DCF23111F56FBC145408236CDA5463FA03614F19F0FAC25B",
+    "committed": false
+  },
+  "accepted_limitations": [
+    {
+      "code": "PRE_ROOM_PROCESS_DEATH_WINDOW",
+      "detail": "Callback and startup buffers remain volatile until the first Room transaction; no zero-loss claim is made."
+    },
+    {
+      "code": "WORKMANAGER_RETURN_WINDOW",
+      "detail": "A small technically-running return window remains lease-contained and was parked as a non-blocking review minor."
+    },
+    {
+      "code": "PHYSICAL_AND_LIVE_ACCEPTANCE_PENDING",
+      "detail": "No Samsung, bearer, Tailscale, real BNN, gateway 202 or server-row proof was performed in M3."
+    },
+    {
+      "code": "PROTECTED_MARKDOWN_PROJECTION_PENDING",
+      "detail": "Protected milestone/acceptance Markdown requires live AUTH capability; canonical checklist and AgentCore memory are current."
+    }
+  ],
+  "remote_present": true,
+  "remote_push_approved": false
+}
