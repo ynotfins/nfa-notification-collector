@@ -51,6 +51,7 @@ fun CollectorHomeScreen(
     requestImport: () -> Unit = {},
     requestExport: () -> Unit = {},
 ) {
+    var batteryReviewed by rememberSaveable { mutableStateOf(false) }
     var destinationName by rememberSaveable { mutableStateOf(CollectorDestination.Status.name) }
     val destination = CollectorDestination.valueOf(destinationName)
     val snapshot by produceState<CollectorUiSnapshot?>(null, repository, destination) {
@@ -81,6 +82,8 @@ fun CollectorHomeScreen(
                         current,
                         openNotificationAccessSettings,
                         openBatterySettings,
+                        batteryReviewed,
+                        { batteryReviewed = true },
                         Modifier.padding(padding),
                     )
                 }
@@ -106,17 +109,23 @@ private fun StatusScreen(
     snapshot: CollectorUiSnapshot,
     openNotificationAccessSettings: () -> Unit,
     openBatterySettings: () -> Unit,
+    batteryReviewed: Boolean,
+    onBatterySettings: () -> Unit,
     modifier: Modifier,
 ) {
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Status", modifier = Modifier.semantics { heading() })
         Text(if (snapshot.readiness.state == CollectorReadinessState.Ready) "Ready" else "Setup required")
+        Text("Guided setup: ${GuidedSetup.next(snapshot.readiness, batteryReviewed)}")
         Text("Notification access: ${if (snapshot.readiness.notificationAccessGranted) "Granted" else "Required"}")
         Button(onClick = openNotificationAccessSettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
             Text("Open notification access settings")
         }
         Text("Battery reliability: ${snapshot.batteryState}")
-        Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+        Button(onClick = {
+            onBatterySettings()
+            openBatterySettings()
+        }, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
             Text("Open battery settings")
         }
         StatusFacts(snapshot)

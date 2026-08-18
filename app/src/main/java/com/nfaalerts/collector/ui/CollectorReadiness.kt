@@ -36,6 +36,33 @@ enum class CollectorDestination {
     Settings,
 }
 
+enum class GuidedSetupStep {
+    Access,
+    Battery,
+    Endpoint,
+    Token,
+    Sources,
+    Verify,
+    Ready,
+}
+
+object GuidedSetup {
+    fun next(
+        readiness: CollectorReadiness,
+        batteryReviewed: Boolean = false,
+    ): GuidedSetupStep =
+        when {
+            !readiness.notificationAccessGranted -> GuidedSetupStep.Access
+            !batteryReviewed -> GuidedSetupStep.Battery
+            !readiness.endpointIsValid -> GuidedSetupStep.Endpoint
+            !readiness.bearerSaved -> GuidedSetupStep.Token
+            !readiness.deviceIdIsValid -> GuidedSetupStep.Endpoint
+            readiness.enabledSourceCount == 0 -> GuidedSetupStep.Sources
+            readiness.state == CollectorReadinessState.Ready -> GuidedSetupStep.Ready
+            else -> GuidedSetupStep.Verify
+        }
+}
+
 data class DeliveryUiRow(
     val eventId: String,
     val sourceId: String,
