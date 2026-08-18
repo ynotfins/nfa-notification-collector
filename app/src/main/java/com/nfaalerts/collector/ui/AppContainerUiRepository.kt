@@ -41,6 +41,13 @@ class AppContainerUiRepository internal constructor(
     private val configState = MutableStateFlow<UiConfigState?>(null)
     private val bearerState = MutableStateFlow<BearerUiState?>(null)
     private val verifiedKey = MutableStateFlow<LiveVerificationFingerprint?>(null)
+    private val tokenSaveCoordinator =
+        TokenSaveCoordinator(
+            saveBearer = container.bearerStore::save,
+            invalidateVerification = { verifiedKey.value = null },
+            refreshBearer = { refreshBearerState(requirePresent = true) },
+            requeue = container::onRelevantConfigurationChanged,
+        )
     internal val platformRefreshCount: Long
         get() = platform.refreshCount
     internal val platformSourceType: String
@@ -177,20 +184,26 @@ class AppContainerUiRepository internal constructor(
                         CollectorConfigCodec().defaultDocument().toUiConfigState(valid = false)
                     }
                 }
-            bearerState.value =
-                container.bearerStore.load().let { state ->
-                    if (state is BearerLoadState.Present) {
-                        val revision = state.revision
-                        state.clear()
-                        BearerUiState(present = true, revisionFingerprint = revision)
-                    } else {
-                        BearerUiState(
-                            present = false,
-                            revisionFingerprint = if (state == BearerLoadState.Missing) 0L else null,
-                        )
-                    }
-                }
+            refreshBearerState()
         }
+    }
+
+    private suspend fun refreshBearerState(requirePresent: Boolean = false) {
+        val refreshed =
+            container.bearerStore.load().let { state ->
+                if (state is BearerLoadState.Present) {
+                    val revision = state.revision
+                    state.clear()
+                    BearerUiState(present = true, revisionFingerprint = revision)
+                } else {
+                    BearerUiState(
+                        present = false,
+                        revisionFingerprint = if (state == BearerLoadState.Missing) 0L else null,
+                    )
+                }
+            }
+        bearerState.value = refreshed
+        if (requirePresent && !refreshed.present) error("BEARER_REVISION_REFRESH_PENDING")
     }
 
     override suspend fun installedApps(): List<InstalledApp> = container.installedApps.installedApps()
@@ -224,16 +237,7 @@ class AppContainerUiRepository internal constructor(
 
     override suspend fun deliveryEnvelope(eventId: String): String? = container.deliveryEnvelopeForUi(eventId)
 
-    override suspend fun saveToken(value: CharArray): Boolean =
-        runCatching {
-            container.bearerStore.save(value)
-            container.onRelevantConfigurationChanged()
-        }.isSuccess.also {
-            if (it) {
-                verifiedKey.value = null
-                refreshStoredState()
-            }
-        }
+    override suspend fun saveToken(value: CharArray): TokenSaveOutcome = tokenSaveCoordinator.save(value)
 
     override suspend fun saveConfig(payload: String): List<ConfigValidationError> =
         container.configStore

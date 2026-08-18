@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
@@ -173,6 +174,29 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithText("Notification access: Unknown").assertIsDisplayed()
         composeRule.onNodeWithText("Notification access could not be checked safely.").assertIsDisplayed()
     }
+
+    @Test
+    fun savedTokenWithPendingRequeueClosesSecretDialogAndShowsSafeWarning() {
+        val repository = FakeCollectorUiRepository()
+        repository.tokenOutcome = TokenSaveOutcome.SavedRequeueFailed
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithText("Enter token").performClick()
+        composeRule.onNodeWithText("Bearer token").performTextInput("transient-secret")
+        composeRule.onNodeWithText("Save token").performClick()
+
+        composeRule.onNodeWithText("Secure token entry").assertDoesNotExist()
+        composeRule
+            .onNodeWithText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry.")
+            .assertIsDisplayed()
+    }
 }
 
 private class FakeCollectorUiRepository(
@@ -182,6 +206,7 @@ private class FakeCollectorUiRepository(
         MutableStateFlow(initial)
     override val state: StateFlow<CollectorUiSnapshot> = mutableState
     var verifyCalls = 0
+    var tokenOutcome = TokenSaveOutcome.Saved
 
     override fun refreshPlatformState() = Unit
 
@@ -199,9 +224,9 @@ private class FakeCollectorUiRepository(
 
     override suspend fun deliveryEnvelope(eventId: String): String? = null
 
-    override suspend fun saveToken(value: CharArray): Boolean {
+    override suspend fun saveToken(value: CharArray): TokenSaveOutcome {
         value.fill('\u0000')
-        return true
+        return tokenOutcome
     }
 
     override suspend fun saveConfig(payload: String): List<ConfigValidationError> = emptyList()

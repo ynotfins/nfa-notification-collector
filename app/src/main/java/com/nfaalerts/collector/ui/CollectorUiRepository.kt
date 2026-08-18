@@ -21,7 +21,7 @@ interface CollectorUiRepository {
 
     suspend fun deliveryEnvelope(eventId: String): String?
 
-    suspend fun saveToken(value: CharArray): Boolean
+    suspend fun saveToken(value: CharArray): TokenSaveOutcome
 
     suspend fun saveConfig(payload: String): List<ConfigValidationError>
 

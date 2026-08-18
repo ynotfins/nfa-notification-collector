@@ -368,13 +368,21 @@ private fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var tokenEntry by remember { mutableStateOf(false) }
+    var tokenWarning by remember { mutableStateOf<String?>(null) }
     var editor by remember { mutableStateOf("") }
     var errors by rememberSaveable { mutableStateOf("") }
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Connection settings", modifier = Modifier.semantics { heading() })
         Text("Active HTTPS endpoint: ${snapshot.endpoint}. Profiles do not fail over automatically.")
         Text("Device ID: ${snapshot.deviceId}")
-        Button(onClick = { tokenEntry = true }, modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Enter token") }
+        Button(
+            onClick = {
+                tokenWarning = null
+                tokenEntry = true
+            },
+            modifier = Modifier.sizeIn(minHeight = 48.dp),
+        ) { Text("Enter token") }
+        tokenWarning?.let { Text(it) }
         Text("Retry and retention are stored in the non-secret configuration.")
         TextButton(onClick = { scope.launch { editor = repository.formattedConfig() } }) { Text("Load current JSON") }
         OutlinedTextField(
@@ -417,10 +425,18 @@ private fun SettingsScreen(
         Text("Exports never include bearer credentials, captures, diagnostics, or ciphertext.")
     }
     if (showTokenEntry || tokenEntry) {
-        TokenEntryDialog(repository) {
-            tokenEntry = false
-            onTokenEntryHandled()
-        }
+        TokenEntryDialog(
+            repository = repository,
+            dismiss = {
+                tokenEntry = false
+                onTokenEntryHandled()
+            },
+            onSaved = { warning ->
+                tokenWarning = warning
+                tokenEntry = false
+                onTokenEntryHandled()
+            },
+        )
     }
 }
 
@@ -438,6 +454,7 @@ private fun GuidedSetupStep.actionLabel(): String =
 private fun TokenEntryDialog(
     repository: CollectorUiRepository,
     dismiss: () -> Unit,
+    onSaved: (String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var token by remember { mutableStateOf("") }
@@ -461,9 +478,15 @@ private fun TokenEntryDialog(
                 onClick = {
                     val transient = token.toCharArray()
                     scope.launch {
-                        if (repository.saveToken(transient)) {
+                        val outcome =
+                            try {
+                                repository.saveToken(transient)
+                            } finally {
+                                transient.fill('\u0000')
+                            }
+                        if (outcome.saved) {
                             token = ""
-                            dismiss()
+                            onSaved(outcome.safeWarning)
                         } else {
                             tokenError = "Token could not be saved."
                         }
