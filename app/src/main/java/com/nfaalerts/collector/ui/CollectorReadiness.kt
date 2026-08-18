@@ -38,7 +38,6 @@ enum class CollectorDestination {
 
 enum class GuidedSetupStep {
     Access,
-    Battery,
     Endpoint,
     Token,
     Sources,
@@ -49,16 +48,15 @@ enum class GuidedSetupStep {
 object GuidedSetup {
     fun next(
         readiness: CollectorReadiness,
-        batteryReviewed: Boolean = false,
+        verificationComplete: Boolean = false,
     ): GuidedSetupStep =
         when {
             !readiness.notificationAccessGranted -> GuidedSetupStep.Access
-            !batteryReviewed -> GuidedSetupStep.Battery
             !readiness.endpointIsValid -> GuidedSetupStep.Endpoint
             !readiness.bearerSaved -> GuidedSetupStep.Token
             !readiness.deviceIdIsValid -> GuidedSetupStep.Endpoint
             readiness.enabledSourceCount == 0 -> GuidedSetupStep.Sources
-            readiness.state == CollectorReadinessState.Ready -> GuidedSetupStep.Ready
+            verificationComplete -> GuidedSetupStep.Ready
             else -> GuidedSetupStep.Verify
         }
 }
@@ -80,13 +78,31 @@ data class CollectorUiSnapshot(
     val endpoint: String,
     val deviceId: String,
     val selectedCount: Int,
-    val queueCount: Int,
+    val queueCount: Long,
     val listenerState: String,
     val lastCapture: String = "Unknown",
     val lastSend: String = "Unknown",
     val lastError: String = "Unknown",
     val networkState: String = "Unknown",
     val batteryState: String = "Unknown",
+    val totalCount: Long = 0,
+    val queueCountsByState: Map<DeliveryState, Long> = emptyMap(),
+    val serverReceivedAt: String = "Unknown",
+    val verificationComplete: Boolean = false,
+    val verificationMessage: String = "Run the safe local verification check.",
+    val loading: Boolean = false,
+) {
+    val guidedStep: GuidedSetupStep
+        get() = GuidedSetup.next(readiness, verificationComplete)
+}
+
+internal data class LocalVerificationKey(
+    val endpoint: String,
+    val deviceId: String,
+    val notificationAccessGranted: Boolean,
+    val bearerSaved: Boolean,
+    val enabledSourceCount: Int,
+    val connectivityState: String,
 )
 
 object DeliveryRetryEligibility {

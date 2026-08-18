@@ -5,6 +5,7 @@ import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Transaction
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class CaptureWriteDao {
@@ -45,7 +46,47 @@ interface CaptureReadDao {
         """,
     )
     suspend fun recentDeliveryInspection(limit: Int): List<DeliveryInspection>
+
+    @Query(
+        """
+        SELECT
+          (SELECT COUNT(*) FROM delivery_outbox) AS totalCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state != 'SENT') AS nonSentCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'PENDING') AS pendingCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'SENDING') AS sendingCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'RETRY_WAIT') AS retryWaitCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'PAUSED_AUTH') AS pausedAuthCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'BLOCKED_CONTRACT') AS blockedContractCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'QUARANTINED') AS quarantinedCount,
+          (SELECT COUNT(*) FROM delivery_outbox WHERE state = 'SENT') AS sentCount,
+          (SELECT capturedAtEpochMillis FROM captured_notifications
+             ORDER BY capturedAtEpochMillis DESC, eventId DESC LIMIT 1) AS lastCaptureAtEpochMillis,
+          (SELECT sentAtEpochMillis FROM delivery_outbox WHERE state = 'SENT'
+             ORDER BY sentAtEpochMillis DESC, updatedAtEpochMillis DESC, eventId DESC LIMIT 1) AS lastSentAtEpochMillis,
+          (SELECT serverReceivedAt FROM delivery_outbox WHERE state = 'SENT'
+             ORDER BY sentAtEpochMillis DESC, updatedAtEpochMillis DESC, eventId DESC LIMIT 1) AS lastServerReceivedAt,
+          (SELECT lastErrorCode FROM delivery_outbox WHERE lastErrorCode IS NOT NULL
+             ORDER BY updatedAtEpochMillis DESC, eventId DESC LIMIT 1) AS latestSafeError
+        """,
+    )
+    fun collectorStatus(): Flow<CollectorStatusAggregate>
 }
+
+data class CollectorStatusAggregate(
+    val totalCount: Long,
+    val nonSentCount: Long,
+    val pendingCount: Long,
+    val sendingCount: Long,
+    val retryWaitCount: Long,
+    val pausedAuthCount: Long,
+    val blockedContractCount: Long,
+    val quarantinedCount: Long,
+    val sentCount: Long,
+    val lastCaptureAtEpochMillis: Long?,
+    val lastSentAtEpochMillis: Long?,
+    val lastServerReceivedAt: String?,
+    val latestSafeError: String?,
+)
 
 data class DeliveryInspection(
     val eventId: String,

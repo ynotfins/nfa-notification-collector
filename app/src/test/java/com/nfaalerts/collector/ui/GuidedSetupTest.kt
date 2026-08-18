@@ -9,15 +9,24 @@ class GuidedSetupTest {
         val start = CollectorReadiness(false, false, false, false, 0)
         assertEquals(GuidedSetupStep.Access, GuidedSetup.next(start))
         assertEquals(
-            GuidedSetupStep.Battery,
+            GuidedSetupStep.Endpoint,
             GuidedSetup.next(start.copy(notificationAccessGranted = true)),
         )
         assertEquals(
-            GuidedSetupStep.Endpoint,
-            GuidedSetup.next(
-                start.copy(notificationAccessGranted = true, endpointIsValid = false),
-                batteryReviewed = true,
-            ),
+            GuidedSetupStep.Token,
+            GuidedSetup.next(start.copy(notificationAccessGranted = true, endpointIsValid = true)),
+        )
+        assertEquals(
+            GuidedSetupStep.Sources,
+            GuidedSetup.next(start.copy(true, true, true, true, 0)),
+        )
+        assertEquals(
+            GuidedSetupStep.Verify,
+            GuidedSetup.next(start.copy(true, true, true, true, 1)),
+        )
+        assertEquals(
+            GuidedSetupStep.Ready,
+            GuidedSetup.next(start.copy(true, true, true, true, 1), verificationComplete = true),
         )
     }
 }

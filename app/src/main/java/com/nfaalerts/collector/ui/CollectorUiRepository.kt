@@ -4,9 +4,14 @@ import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
+import kotlinx.coroutines.flow.StateFlow
 
 interface CollectorUiRepository {
-    suspend fun snapshot(): CollectorUiSnapshot
+    val state: StateFlow<CollectorUiSnapshot>
+
+    fun refreshPlatformState()
+
+    suspend fun verify(): Boolean
 
     suspend fun installedApps(): List<InstalledApp>
 

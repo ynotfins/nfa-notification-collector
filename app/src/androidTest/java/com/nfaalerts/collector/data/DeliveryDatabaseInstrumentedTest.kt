@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -219,6 +220,42 @@ class DeliveryDatabaseInstrumentedTest {
             assertEquals(listOf("d-5", "d-4"), dao.recent(10).map(DiagnosticEventEntity::diagnosticId))
         }
 
+    @Test
+    fun collectorStatusFlowUsesAllRowsAndLatestSafeFacts() =
+        runBlocking {
+            database = inMemoryDatabase()
+            (1L..101L).forEach { index ->
+                insert("pending-$index", DeliveryState.PENDING, capturedAt = index)
+            }
+            insert(
+                eventId = "sent",
+                state = DeliveryState.SENT,
+                updatedAt = 200,
+                sentAt = 190,
+                capturedAt = 200,
+                serverReceivedAt = "2026-08-18T12:00:00Z",
+            )
+            insert(
+                eventId = "retry",
+                state = DeliveryState.RETRY_WAIT,
+                updatedAt = 300,
+                capturedAt = 300,
+                lastErrorCode = "HTTP_503",
+            )
+
+            val status = database!!.captureReadDao().collectorStatus().first()
+
+            assertEquals(103L, status.totalCount)
+            assertEquals(102L, status.nonSentCount)
+            assertEquals(101L, status.pendingCount)
+            assertEquals(1L, status.retryWaitCount)
+            assertEquals(1L, status.sentCount)
+            assertEquals(300L, status.lastCaptureAtEpochMillis)
+            assertEquals(190L, status.lastSentAtEpochMillis)
+            assertEquals("2026-08-18T12:00:00Z", status.lastServerReceivedAt)
+            assertEquals("HTTP_503", status.latestSafeError)
+        }
+
     private fun inMemoryDatabase() = Room.inMemoryDatabaseBuilder(context, NfaCollectorDatabase::class.java).build()
 
     private suspend fun insert(
@@ -227,36 +264,43 @@ class DeliveryDatabaseInstrumentedTest {
         nextAttemptAt: Long? = null,
         updatedAt: Long = 0L,
         sentAt: Long? = null,
+        capturedAt: Long = 0L,
+        serverReceivedAt: String? = null,
+        lastErrorCode: String? = null,
     ) {
         database!!.captureWriteDao().insertCapture(
-            capture(eventId),
+            capture(eventId, capturedAt),
             DeliveryOutboxEntity(
                 eventId = eventId,
                 state = state,
                 nextAttemptAtEpochMillis = nextAttemptAt,
                 sentAtEpochMillis = sentAt,
+                lastErrorCode = lastErrorCode,
+                serverReceivedAt = serverReceivedAt,
                 createdAtEpochMillis = 0L,
                 updatedAtEpochMillis = updatedAt,
             ),
         )
     }
 
-    private fun capture(eventId: String) =
-        CapturedNotificationEntity(
-            eventId = eventId,
-            packageName = "com.example.bnn",
-            sourceId = "bnn",
-            notificationKey = "key-$eventId",
-            notificationId = 1,
-            notificationTag = null,
-            postTimeEpochMillis = 0L,
-            capturedAtEpochMillis = 0L,
-            rawText = "raw-$eventId",
-            rawCandidatesJson = "{}",
-            envelopeJson = "{}",
-            envelopeSha256 = "sha-$eventId",
-            envelopeUtf8Bytes = 2,
-        )
+    private fun capture(
+        eventId: String,
+        capturedAt: Long = 0L,
+    ) = CapturedNotificationEntity(
+        eventId = eventId,
+        packageName = "com.example.bnn",
+        sourceId = "bnn",
+        notificationKey = "key-$eventId",
+        notificationId = 1,
+        notificationTag = null,
+        postTimeEpochMillis = 0L,
+        capturedAtEpochMillis = capturedAt,
+        rawText = "raw-$eventId",
+        rawCandidatesJson = "{}",
+        envelopeJson = "{}",
+        envelopeSha256 = "sha-$eventId",
+        envelopeUtf8Bytes = 2,
+    )
 
     private companion object {
         const val MIGRATION_DB = "delivery-migration.db"

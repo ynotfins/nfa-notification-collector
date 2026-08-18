@@ -18,6 +18,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,12 +32,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nfaalerts.collector.capture.RawTextField
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.ui.sources.SourcePickerScreen
@@ -51,12 +56,10 @@ fun CollectorHomeScreen(
     requestImport: () -> Unit = {},
     requestExport: () -> Unit = {},
 ) {
-    var batteryReviewed by rememberSaveable { mutableStateOf(false) }
     var destinationName by rememberSaveable { mutableStateOf(CollectorDestination.Status.name) }
+    var tokenEntryRequested by remember { mutableStateOf(false) }
     val destination = CollectorDestination.valueOf(destinationName)
-    val snapshot by produceState<CollectorUiSnapshot?>(null, repository, destination) {
-        value = repository.snapshot()
-    }
+    val snapshot by repository.state.collectAsStateWithLifecycle()
     Scaffold(
         modifier = modifier.fillMaxSize(),
         bottomBar = {
@@ -72,24 +75,49 @@ fun CollectorHomeScreen(
             }
         },
     ) { padding ->
-        val current = snapshot
-        if (current == null) {
+        if (snapshot.loading) {
             Text("Loading collector status", modifier = Modifier.padding(padding).padding(24.dp))
         } else {
             when (destination) {
                 CollectorDestination.Status -> {
                     StatusScreen(
-                        current,
-                        openNotificationAccessSettings,
-                        openBatterySettings,
-                        batteryReviewed,
-                        { batteryReviewed = true },
+                        snapshot = snapshot,
+                        onGuidedAction = { step ->
+                            when (step) {
+                                GuidedSetupStep.Access -> {
+                                    openNotificationAccessSettings()
+                                }
+
+                                GuidedSetupStep.Endpoint -> {
+                                    destinationName = CollectorDestination.Settings.name
+                                }
+
+                                GuidedSetupStep.Token -> {
+                                    destinationName = CollectorDestination.Settings.name
+                                    tokenEntryRequested = true
+                                }
+
+                                GuidedSetupStep.Sources -> {
+                                    destinationName = CollectorDestination.Sources.name
+                                }
+
+                                GuidedSetupStep.Verify -> {
+                                    Unit
+                                }
+
+                                GuidedSetupStep.Ready -> {
+                                    Unit
+                                }
+                            }
+                        },
+                        verify = { repository.verify() },
+                        openBatterySettings = openBatterySettings,
                         Modifier.padding(padding),
                     )
                 }
 
                 CollectorDestination.Sources -> {
-                    SourcesScreen(repository, current, Modifier.padding(padding))
+                    SourcesScreen(repository, snapshot, Modifier.padding(padding))
                 }
 
                 CollectorDestination.Delivery -> {
@@ -97,7 +125,15 @@ fun CollectorHomeScreen(
                 }
 
                 CollectorDestination.Settings -> {
-                    SettingsScreen(repository, current, requestImport, requestExport, Modifier.padding(padding))
+                    SettingsScreen(
+                        repository,
+                        snapshot,
+                        requestImport,
+                        requestExport,
+                        tokenEntryRequested,
+                        { tokenEntryRequested = false },
+                        Modifier.padding(padding),
+                    )
                 }
             }
         }
@@ -107,25 +143,45 @@ fun CollectorHomeScreen(
 @Composable
 private fun StatusScreen(
     snapshot: CollectorUiSnapshot,
-    openNotificationAccessSettings: () -> Unit,
+    onGuidedAction: (GuidedSetupStep) -> Unit,
+    verify: suspend () -> Boolean,
     openBatterySettings: () -> Unit,
-    batteryReviewed: Boolean,
-    onBatterySettings: () -> Unit,
     modifier: Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Status", modifier = Modifier.semantics { heading() })
-        Text(if (snapshot.readiness.state == CollectorReadinessState.Ready) "Ready" else "Setup required")
-        Text("Guided setup: ${GuidedSetup.next(snapshot.readiness, batteryReviewed)}")
-        Text("Notification access: ${if (snapshot.readiness.notificationAccessGranted) "Granted" else "Required"}")
-        Button(onClick = openNotificationAccessSettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
-            Text("Open notification access settings")
+        if (snapshot.guidedStep == GuidedSetupStep.Ready) {
+            Surface(
+                color = Color(0xFFD8F3DC),
+                contentColor = Color(0xFF176B2C),
+                modifier = Modifier.fillMaxWidth().semantics { stateDescription = "Collector ready" },
+            ) {
+                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("✓", modifier = Modifier.semantics { contentDescription = "Ready status icon" })
+                    Text("Ready — required setup and local verification are complete")
+                }
+            }
+        } else {
+            Text("Setup required")
+            Text("Guided setup: ${snapshot.guidedStep}")
+            Button(
+                onClick = {
+                    if (snapshot.guidedStep == GuidedSetupStep.Verify) {
+                        scope.launch { verify() }
+                    } else {
+                        onGuidedAction(snapshot.guidedStep)
+                    }
+                },
+                modifier = Modifier.sizeIn(minHeight = 48.dp),
+            ) {
+                Text(snapshot.guidedStep.actionLabel())
+            }
+            Text(snapshot.verificationMessage)
         }
+        Text("Notification access: ${if (snapshot.readiness.notificationAccessGranted) "Granted" else "Required"}")
         Text("Battery reliability: ${snapshot.batteryState}")
-        Button(onClick = {
-            onBatterySettings()
-            openBatterySettings()
-        }, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+        Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
             Text("Open battery settings")
         }
         StatusFacts(snapshot)
@@ -138,9 +194,14 @@ private fun StatusFacts(snapshot: CollectorUiSnapshot) {
         item { Text("Endpoint: ${snapshot.endpoint}") }
         item { Text("Selected sources: ${snapshot.selectedCount}") }
         item { Text("Queue: ${snapshot.queueCount}") }
+        item { Text("Captured total: ${snapshot.totalCount}") }
+        snapshot.queueCountsByState.forEach { (state, count) ->
+            item { Text("${state.name}: $count") }
+        }
         item { Text("Listener: ${snapshot.listenerState}") }
         item { Text("Last capture: ${snapshot.lastCapture}") }
         item { Text("Last send: ${snapshot.lastSend}") }
+        item { Text("Server received: ${snapshot.serverReceivedAt}") }
         item { Text("Last error: ${snapshot.lastError}") }
         item { Text("Network: ${snapshot.networkState}") }
     }
@@ -292,10 +353,12 @@ private fun SettingsScreen(
     snapshot: CollectorUiSnapshot,
     requestImport: () -> Unit,
     requestExport: () -> Unit,
+    showTokenEntry: Boolean,
+    onTokenEntryHandled: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var tokenEntry by rememberSaveable { mutableStateOf(false) }
+    var tokenEntry by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf("") }
     var errors by rememberSaveable { mutableStateOf("") }
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -344,8 +407,23 @@ private fun SettingsScreen(
         }
         Text("Exports never include bearer credentials, captures, diagnostics, or ciphertext.")
     }
-    if (tokenEntry) TokenEntryDialog(repository) { tokenEntry = false }
+    if (showTokenEntry || tokenEntry) {
+        TokenEntryDialog(repository) {
+            tokenEntry = false
+            onTokenEntryHandled()
+        }
+    }
 }
+
+private fun GuidedSetupStep.actionLabel(): String =
+    when (this) {
+        GuidedSetupStep.Access -> "Grant notification access"
+        GuidedSetupStep.Endpoint -> "Configure endpoint and device"
+        GuidedSetupStep.Token -> "Enter token"
+        GuidedSetupStep.Sources -> "Choose sources"
+        GuidedSetupStep.Verify -> "Run local verification"
+        GuidedSetupStep.Ready -> "Ready"
+    }
 
 @Composable
 private fun TokenEntryDialog(

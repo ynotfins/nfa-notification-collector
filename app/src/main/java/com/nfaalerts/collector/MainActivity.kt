@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        uiRepository = AppContainerUiRepository(this, (application as NfaCollectorApp).appContainer)
+        uiRepository = AppContainerUiRepository(this, (application as NfaCollectorApp).appContainer, lifecycleScope)
         setContent {
             NfaCollectorTheme {
                 CollectorHomeScreen(
@@ -52,12 +52,19 @@ class MainActivity : ComponentActivity() {
                     openNotificationAccessSettings = {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     },
-                    openBatterySettings = { startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)) },
+                    openBatterySettings = {
+                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    },
                     requestImport = { importConfig.launch(arrayOf("application/json", "text/plain")) },
                     requestExport = { exportConfig.launch("collector-config.json") },
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::uiRepository.isInitialized) uiRepository.refreshPlatformState()
     }
 
     private companion object {

@@ -2,14 +2,19 @@ package com.nfaalerts.collector.ui
 
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.config.SourceSelection
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -61,25 +66,105 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
     }
+
+    @Test
+    fun statusReflectsRepositoryChangesWithoutNavigation() {
+        val repository = FakeCollectorUiRepository()
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+        composeRule.onNodeWithText("Setup required").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            repository.mutableState.value =
+                repository.mutableState.value.copy(
+                    readiness = CollectorReadiness(true, true, true, true, 1),
+                    verificationComplete = true,
+                )
+        }
+
+        composeRule.onNodeWithText("Ready — required setup and local verification are complete").assertIsDisplayed()
+    }
+
+    @Test
+    fun guidedStepsOpenTheirRealDestinationsAndDialogs() {
+        var accessOpened = false
+        val repository = FakeCollectorUiRepository()
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = { accessOpened = true },
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Grant notification access").performClick()
+        composeRule.runOnIdle { assertTrue(accessOpened) }
+
+        repository.mutableState.value = repository.mutableState.value.withReadiness(true, false, false, true, 0)
+        composeRule.onNodeWithText("Configure endpoint and device").performClick()
+        composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
+
+        composeRule.onNodeWithText("Status").performClick()
+        repository.mutableState.value = repository.mutableState.value.withReadiness(true, true, false, true, 0)
+        composeRule.onNodeWithText("Enter token").performClick()
+        composeRule.onNodeWithText("Secure token entry").assertIsDisplayed()
+        composeRule.onNodeWithText("Cancel").performClick()
+
+        composeRule.onNodeWithText("Status").performClick()
+        repository.mutableState.value = repository.mutableState.value.withReadiness(true, true, true, true, 0)
+        composeRule.onNodeWithText("Choose sources").performClick()
+        composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
+    }
+
+    @Test
+    fun verifyTransitionsToTextualGreenSemanticReadyState() {
+        val repository =
+            FakeCollectorUiRepository(
+                initial =
+                    defaultSnapshot().copy(
+                        readiness = CollectorReadiness(true, true, true, true, 1),
+                        networkState = "Connected",
+                    ),
+            )
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Run local verification").performClick()
+
+        composeRule.onNodeWithText("Ready — required setup and local verification are complete").assertIsDisplayed()
+        composeRule
+            .onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collector ready"))
+            .assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Ready status icon").assertIsDisplayed()
+        assertTrue(repository.verifyCalls == 1)
+    }
 }
 
-private class FakeCollectorUiRepository : CollectorUiRepository {
-    override suspend fun snapshot() =
-        CollectorUiSnapshot(
-            readiness =
-                CollectorReadiness(
-                    notificationAccessGranted = false,
-                    endpointIsValid = true,
-                    bearerSaved = false,
-                    deviceIdIsValid = true,
-                    enabledSourceCount = 1,
-                ),
-            endpoint = "https://example.invalid",
-            deviceId = "synthetic-device",
-            selectedCount = 1,
-            queueCount = 0,
-            listenerState = "Unknown",
-        )
+private class FakeCollectorUiRepository(
+    initial: CollectorUiSnapshot = defaultSnapshot(),
+) : CollectorUiRepository {
+    val mutableState =
+        MutableStateFlow(initial)
+    override val state: StateFlow<CollectorUiSnapshot> = mutableState
+    var verifyCalls = 0
+
+    override fun refreshPlatformState() = Unit
+
+    override suspend fun verify(): Boolean {
+        verifyCalls += 1
+        mutableState.value = mutableState.value.copy(verificationComplete = true)
+        return true
+    }
 
     override suspend fun installedApps(): List<InstalledApp> = emptyList()
 
@@ -104,3 +189,31 @@ private class FakeCollectorUiRepository : CollectorUiRepository {
 
     override suspend fun retry(eventId: String): Boolean = false
 }
+
+private fun defaultSnapshot() =
+    CollectorUiSnapshot(
+        readiness =
+            CollectorReadiness(
+                notificationAccessGranted = false,
+                endpointIsValid = true,
+                bearerSaved = false,
+                deviceIdIsValid = true,
+                enabledSourceCount = 1,
+            ),
+        endpoint = "https://example.invalid",
+        deviceId = "synthetic-device",
+        selectedCount = 1,
+        queueCount = 0,
+        listenerState = "Unknown",
+    )
+
+private fun CollectorUiSnapshot.withReadiness(
+    access: Boolean,
+    endpoint: Boolean,
+    bearer: Boolean,
+    deviceId: Boolean,
+    sources: Int,
+) = copy(
+    readiness = CollectorReadiness(access, endpoint, bearer, deviceId, sources),
+    verificationComplete = false,
+)

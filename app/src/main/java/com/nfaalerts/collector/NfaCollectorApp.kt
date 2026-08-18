@@ -11,6 +11,7 @@ import com.nfaalerts.collector.config.ConfigLoadResult
 import com.nfaalerts.collector.config.InstalledAppRepository
 import com.nfaalerts.collector.config.JsonSourceSelectionStore
 import com.nfaalerts.collector.config.SourceSelectionRepository
+import com.nfaalerts.collector.data.CollectorStatusAggregate
 import com.nfaalerts.collector.data.NfaCollectorDatabase
 import com.nfaalerts.collector.delivery.BearerLoad
 import com.nfaalerts.collector.delivery.DeliveryCoordinator
@@ -24,6 +25,7 @@ import com.nfaalerts.collector.security.BearerLoadState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.nio.ByteBuffer
@@ -123,6 +125,8 @@ class AppContainer(
     suspend fun nextDeliveryDueAt(): Long? = database.deliveryDao().nextDueAtEpochMillis()
 
     internal suspend fun recentDeliveryInspection() = database.captureReadDao().recentDeliveryInspection(100)
+
+    internal fun collectorStatus(): Flow<CollectorStatusAggregate> = database.captureReadDao().collectorStatus()
 
     internal suspend fun deliveryEnvelopeForUi(eventId: String): String? =
         database.captureReadDao().capture(eventId)?.envelopeJson
