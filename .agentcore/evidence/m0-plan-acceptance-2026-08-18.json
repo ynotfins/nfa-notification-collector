@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-18T08:27:43.8035126Z",
+  "project": {
+    "project_key": "nfa-notification-collector",
+    "project_root": "D:\\github\\nfa-notification-collector",
+    "branch": "main",
+    "head_before_m0_commit": "c525e5a6076a93be307a547d431207b7be4d8ec1",
+    "enrollment_exact": true,
+    "remote_present": true,
+    "remote_approved_for_push": false
+  },
+  "agentcore_memory": {
+    "signed_session_open": true,
+    "startup_context_ok": true,
+    "session_id": "934ff1e9-38d9-4ec0-9677-99e8d5b9b459",
+    "session_key": "nfa-notification-collector:codex:android-collector-build"
+  },
+  "documentation": {
+    "arabold_ok": false,
+    "arabold_error_code": "MCP_SSE_404",
+    "official_primary_fallback": true,
+    "documentation_guard_verdict": "ACCEPT",
+    "independent_plan_review_verdict": "ACCEPT"
+  },
+  "gateway_tests": {
+    "total": 42,
+    "passed": 42,
+    "failed": 0
+  },
+  "toolchain": {
+    "android_sdk_root": "C:\\Users\\ynotf\\AppData\\Local\\Android\\Sdk",
+    "sdk_platforms": ["30", "33", "34", "35", "36", "36.1"],
+    "sdk_build_tools": ["30.0.3", "34.0.0", "35.0.0", "36.0.0"],
+    "sdk_adb_version": "37.0.0-14910828",
+    "java_home_version": "Temurin 17.0.16",
+    "path_java_version": "Temurin 21.0.11",
+    "connected_device_count": 0,
+    "available_api36_avds": 2
+  },
+  "context_fabric": {
+    "status": "skipped_with_reason",
+    "reason": "No repository-local Context Fabric root or callable CLI is available; machine-global routing was not mutated."
+  },
+  "worker_outcomes": [
+    {
+      "route": "deepseek/deepseek-v4-pro",
+      "role": "initial plan critic",
+      "status": "protocol_failure_completion_budget"
+    },
+    {
+      "route": "minimax/minimax-m3",
+      "role": "fallback independent plan critic",
+      "status": "accepted"
+    },
+    {
+      "route": "deepseek/deepseek-v4-pro",
+      "role": "documentation guard",
+      "status": "accepted_after_bounded_revision_rounds"
+    }
+  ],
+  "sanitization": {
+    "contains_environment_values": false,
+    "contains_bearer": false,
+    "contains_notification_content": false,
+    "contains_database_credentials": false,
+    "contains_hidden_reasoning": false,
+    "active_secret_value_match_count": 0
+  }
+}

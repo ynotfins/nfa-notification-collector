@@ -72,6 +72,32 @@
       "containment": "no commit before successful guard; reduced context and increased explicit timeout/budget",
       "routing_adjustment": "use bounded authority packet plus at least 10000 tokens/300 seconds for large documentation guards",
       "status": "resolved"
+    },
+    {
+      "id": "2026-08-18-plan-critique-fallback",
+      "observed_at_utc": "2026-08-18T08:20:00Z",
+      "worker_route": "deepseek_pro_critique_worker then minimax_m3_worker",
+      "bounded_assignment": "independent Android architecture and security critique before implementation",
+      "expected_outcome": "severity-ranked findings and an ACCEPT/REVISE/BLOCK verdict without server-contract drift",
+      "observed_outcome": "DeepSeek Pro exhausted two completion budgets; the bounded MiniMax fallback returned ACCEPT after valid concurrency, backup, retention and callback clarifications were incorporated",
+      "evidence_refs": ["docs/superpowers/specs/2026-08-18-nfa-notification-collector-design.md","docs/superpowers/plans/2026-08-18-nfa-notification-collector.md"],
+      "classification": "protocol_failure",
+      "containment": "no implementation began; narrowed the packet and used the policy fallback",
+      "routing_adjustment": "prefer bounded MiniMax review when DeepSeek Pro repeatedly spends the full budget on this plan class",
+      "status": "resolved"
+    },
+    {
+      "id": "2026-08-18-m0-documentation-guard",
+      "observed_at_utc": "2026-08-18T08:31:00Z",
+      "worker_route": "documentation_guard_worker / deepseek-v4-pro",
+      "bounded_assignment": "guard the actual M0 design and plan against AgentCore and NFA authority",
+      "expected_outcome": "ACCEPT only after backup, permission, evidence and gate enforcement were decision-complete",
+      "observed_outcome": "multiple bounded REVISE rounds required exact backup-domain assertions, debug-only QUERY_ALL_PACKAGES, evidence-schema validation and nonzero exit propagation; final fresh verdict ACCEPT",
+      "evidence_refs": [".agentcore/evidence/m0-plan-acceptance-2026-08-18.json","docs/superpowers/specs/2026-08-18-nfa-notification-collector-design.md","docs/superpowers/plans/2026-08-18-nfa-notification-collector.md"],
+      "classification": "strong_review",
+      "containment": "M1 remained blocked until final ACCEPT",
+      "routing_adjustment": "include exact executable assertions and evidence schemas in future security-sensitive plans before first guard dispatch",
+      "status": "resolved"
     }
   ]
 }
