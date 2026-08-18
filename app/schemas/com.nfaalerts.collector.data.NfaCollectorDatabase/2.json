@@ -1,0 +1,306 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "9112d5e0e85f712b8f9734a72259505c",
+    "entities": [
+      {
+        "tableName": "captured_notifications",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `packageName` TEXT NOT NULL, `sourceId` TEXT NOT NULL, `notificationKey` TEXT NOT NULL, `notificationId` INTEGER NOT NULL, `notificationTag` TEXT, `postTimeEpochMillis` INTEGER NOT NULL, `capturedAtEpochMillis` INTEGER NOT NULL, `rawText` TEXT, `rawCandidatesJson` TEXT NOT NULL, `envelopeJson` TEXT NOT NULL, `envelopeSha256` TEXT NOT NULL, `envelopeUtf8Bytes` INTEGER NOT NULL, PRIMARY KEY(`eventId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationKey",
+            "columnName": "notificationKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationId",
+            "columnName": "notificationId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationTag",
+            "columnName": "notificationTag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "postTimeEpochMillis",
+            "columnName": "postTimeEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capturedAtEpochMillis",
+            "columnName": "capturedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawText",
+            "columnName": "rawText",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawCandidatesJson",
+            "columnName": "rawCandidatesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "envelopeJson",
+            "columnName": "envelopeJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "envelopeSha256",
+            "columnName": "envelopeSha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "envelopeUtf8Bytes",
+            "columnName": "envelopeUtf8Bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        }
+      },
+      {
+        "tableName": "delivery_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `state` TEXT NOT NULL, `attemptCount` INTEGER NOT NULL, `nextAttemptAtEpochMillis` INTEGER, `leaseOwner` TEXT, `leaseExpiresAtEpochMillis` INTEGER, `lastAttemptAtEpochMillis` INTEGER, `pausedAtConfigRevision` INTEGER, `sentAtEpochMillis` INTEGER, `lastHttpStatus` INTEGER, `lastErrorCode` TEXT, `serverIngestId` TEXT, `serverReceivedAt` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`eventId`), FOREIGN KEY(`eventId`) REFERENCES `captured_notifications`(`eventId`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAtEpochMillis",
+            "columnName": "nextAttemptAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "leaseOwner",
+            "columnName": "leaseOwner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "leaseExpiresAtEpochMillis",
+            "columnName": "leaseExpiresAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastAttemptAtEpochMillis",
+            "columnName": "lastAttemptAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pausedAtConfigRevision",
+            "columnName": "pausedAtConfigRevision",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sentAtEpochMillis",
+            "columnName": "sentAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastHttpStatus",
+            "columnName": "lastHttpStatus",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverIngestId",
+            "columnName": "serverIngestId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverReceivedAt",
+            "columnName": "serverReceivedAt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_delivery_outbox_state_nextAttemptAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "nextAttemptAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_delivery_outbox_state_nextAttemptAtEpochMillis` ON `${TABLE_NAME}` (`state`, `nextAttemptAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "captured_notifications",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "eventId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "capture_retention_tombstones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `envelopeSha256` TEXT NOT NULL, `serverIngestId` TEXT, `retainedAtEpochMillis` INTEGER NOT NULL, `reason` TEXT NOT NULL, PRIMARY KEY(`eventId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "envelopeSha256",
+            "columnName": "envelopeSha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverIngestId",
+            "columnName": "serverIngestId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "retainedAtEpochMillis",
+            "columnName": "retainedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        }
+      },
+      {
+        "tableName": "diagnostic_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`diagnosticId` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `eventCode` TEXT NOT NULL, `safeDetailsJson` TEXT NOT NULL, PRIMARY KEY(`diagnosticId`))",
+        "fields": [
+          {
+            "fieldPath": "diagnosticId",
+            "columnName": "diagnosticId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventCode",
+            "columnName": "eventCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "safeDetailsJson",
+            "columnName": "safeDetailsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "diagnosticId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_diagnostic_events_createdAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_diagnostic_events_createdAtEpochMillis` ON `${TABLE_NAME}` (`createdAtEpochMillis`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9112d5e0e85f712b8f9734a72259505c')"
+    ]
+  }
+}

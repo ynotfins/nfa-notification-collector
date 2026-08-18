@@ -23,6 +23,7 @@ class JsonSourceSelectionStore(
 ) : SourceSelectionStore {
     private val file = AtomicFile(File(context.filesDir, fileName))
     private val legacyFile = AtomicFile(File(context.filesDir, legacyFileName))
+    private val codec = CollectorConfigCodec()
 
     override suspend fun load(): List<SourceSelection> =
         withContext(Dispatchers.IO) {
@@ -71,17 +72,23 @@ class JsonSourceSelectionStore(
         }
     }
 
-    private fun parseCanonical(content: String): JsonObject {
-        val root = parseRoot(content)
-        val version =
-            root["configVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-                ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
-        if (version != FORMAT_VERSION) {
-            throw InvalidSelectionConfigException("UNKNOWN_CONFIG_VERSION")
+    private fun parseCanonical(content: String): JsonObject =
+        when (val decoded = codec.decode(content.encodeToByteArray())) {
+            is ConfigDecodeResult.Valid -> {
+                decoded.document.root
+            }
+
+            is ConfigDecodeResult.Invalid -> {
+                val first = decoded.errors.first()
+                val code =
+                    when (first.code) {
+                        "FUTURE_VERSION_UNSUPPORTED" -> "UNKNOWN_CONFIG_VERSION"
+                        "INVALID_JSON" -> "INVALID_CONFIG"
+                        else -> first.code
+                    }
+                throw InvalidSelectionConfigException(code)
+            }
         }
-        root["sources"]?.jsonArray ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
-        return root
-    }
 
     private fun parseRoot(content: String): JsonObject =
         try {
@@ -147,13 +154,7 @@ class JsonSourceSelectionStore(
         }
     }
 
-    private fun emptyCanonicalRoot() =
-        JsonObject(
-            linkedMapOf(
-                "configVersion" to JsonPrimitive(FORMAT_VERSION),
-                "sources" to JsonArray(emptyList()),
-            ),
-        )
+    private fun emptyCanonicalRoot() = codec.defaultDocument().root
 
     private fun read(atomicFile: AtomicFile): String = atomicFile.openRead().bufferedReader().use { it.readText() }
 

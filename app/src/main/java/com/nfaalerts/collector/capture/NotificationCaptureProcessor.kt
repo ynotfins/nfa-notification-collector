@@ -49,16 +49,31 @@ class NotificationCaptureProcessor(
     private val applicationMetadataResolver: ApplicationMetadataResolver,
     private val persistence: CapturePersistence,
     private val serializer: SafeCanonicalSerializer = SafeCanonicalSerializer(),
+    private val onPersisted: suspend (String) -> Unit = {},
 ) {
     suspend fun process(request: DispatchedNotification) {
+        val rows =
+            try {
+                buildRows(request)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                failureRows(request, CAPTURE_PROCESSING_FAILURE, failure.javaClass.name)
+            }
         try {
-            val rows = buildRows(request)
             persistence.persist(rows.first, rows.second)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
             val fallback = failureRows(request, CAPTURE_PROCESSING_FAILURE, failure.javaClass.name)
             persistence.persist(fallback.first, fallback.second)
+        }
+        try {
+            onPersisted(request.eventId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The immutable Room row is already durable. Worker recovery remains authoritative.
         }
     }
 
@@ -242,6 +257,7 @@ class NotificationCaptureProcessor(
         fun createAndroid(
             packageManager: PackageManager,
             captureWriteDao: () -> com.nfaalerts.collector.data.CaptureWriteDao,
+            onPersisted: suspend (String) -> Unit = {},
         ) = NotificationCaptureProcessor(
             reader =
                 NotificationContentReader {
@@ -265,6 +281,7 @@ class NotificationCaptureProcessor(
                     ->
                     captureWriteDao().insertCapture(capture, outbox)
                 },
+            onPersisted = onPersisted,
         )
     }
 }

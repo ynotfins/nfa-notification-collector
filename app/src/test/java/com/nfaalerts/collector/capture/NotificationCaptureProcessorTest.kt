@@ -101,6 +101,23 @@ class NotificationCaptureProcessorTest {
             assertTrue(envelope.contains("overrideGroupKey"))
         }
 
+    @Test
+    fun `delivery kickoff runs only after immutable Room persistence returns`() =
+        runBlocking {
+            val order = mutableListOf<String>()
+            val processor =
+                NotificationCaptureProcessor(
+                    reader = NotificationContentReader { _, _ -> emptySnapshot() },
+                    applicationMetadataResolver = ApplicationMetadataResolver { _, _ -> ApplicationMetadata(null, 42) },
+                    persistence = CapturePersistence { _, _ -> order += "persisted" },
+                    onPersisted = { eventId -> order += "kick:$eventId" },
+                )
+
+            processor.process(request())
+
+            assertEquals(listOf("persisted", "kick:event-1"), order)
+        }
+
     private fun processor(
         reader: (Any, List<RawTextField>) -> AndroidNotificationSnapshot,
         serializer: SafeCanonicalSerializer = SafeCanonicalSerializer(),

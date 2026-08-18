@@ -41,11 +41,14 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.androidx.room3.runtime)
     implementation(libs.androidx.sqlite.framework)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
 
     ksp(libs.androidx.room3.compiler)
 
@@ -54,9 +57,11 @@ dependencies {
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room3.testing)
     androidTestImplementation(libs.compose.ui.test.junit4)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.okhttp.tls)
 }
 
 room3 {
