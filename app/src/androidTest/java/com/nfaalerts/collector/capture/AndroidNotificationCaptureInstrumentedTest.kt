@@ -16,6 +16,7 @@ import android.os.Parcelable
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.nfaalerts.collector.config.AllowlistSnapshot
+import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SourceSelection
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -148,6 +149,7 @@ class AndroidNotificationCaptureInstrumentedTest {
         val callback =
             PostedNotificationCallback(
                 allowlistProvider = { AllowlistSnapshot.from(listOf(source)) },
+                selectionLoadStateProvider = { SelectionLoadState.Ready },
                 eventIdFactory = { "event-${dispatched.get()}" },
                 clock = { 1L },
                 dispatcher = CaptureDispatcher { dispatched.incrementAndGet() },

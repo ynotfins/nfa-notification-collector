@@ -24,9 +24,9 @@ sealed interface SelectionUpdate {
 }
 
 sealed interface SelectionLoadState {
-    data object NotLoaded : SelectionLoadState
+    data object Loading : SelectionLoadState
 
-    data object Loaded : SelectionLoadState
+    data object Ready : SelectionLoadState
 
     data class Invalid(
         val code: String,
@@ -43,7 +43,7 @@ class SourceSelectionRepository(
     private val mutationMutex = Mutex()
     private val current = AtomicReference(AllowlistSnapshot.EMPTY)
     private val mutableSelections = MutableStateFlow(AllowlistSnapshot.EMPTY)
-    private val mutableLoadState = MutableStateFlow<SelectionLoadState>(SelectionLoadState.NotLoaded)
+    private val mutableLoadState = MutableStateFlow<SelectionLoadState>(SelectionLoadState.Loading)
     val selections: StateFlow<AllowlistSnapshot> = mutableSelections.asStateFlow()
     val loadState: StateFlow<SelectionLoadState> = mutableLoadState.asStateFlow()
 
@@ -51,11 +51,13 @@ class SourceSelectionRepository(
 
     suspend fun load() =
         mutationMutex.withLock {
+            publish(AllowlistSnapshot.EMPTY)
+            mutableLoadState.value = SelectionLoadState.Loading
             try {
                 val loaded = store.load()
                 validateStoredSelections(loaded)
                 publish(AllowlistSnapshot.from(loaded))
-                mutableLoadState.value = SelectionLoadState.Loaded
+                mutableLoadState.value = SelectionLoadState.Ready
             } catch (failure: InvalidSelectionConfigException) {
                 publish(AllowlistSnapshot.EMPTY)
                 mutableLoadState.value = SelectionLoadState.Invalid(failure.code)
@@ -83,7 +85,7 @@ class SourceSelectionRepository(
             val updated = existing.values.sortedBy(SourceSelection::packageName)
             store.save(updated)
             publish(AllowlistSnapshot.from(updated))
-            mutableLoadState.value = SelectionLoadState.Loaded
+            mutableLoadState.value = SelectionLoadState.Ready
             SelectionUpdate.Accepted
         }
 
@@ -92,7 +94,7 @@ class SourceSelectionRepository(
             val updated = current.get().selections.filterNot { it.packageName == packageName }
             store.save(updated)
             publish(AllowlistSnapshot.from(updated))
-            mutableLoadState.value = SelectionLoadState.Loaded
+            mutableLoadState.value = SelectionLoadState.Ready
         }
 
     private fun publish(snapshot: AllowlistSnapshot) {

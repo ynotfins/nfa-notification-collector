@@ -20,6 +20,10 @@ data class ListenerStatus(
     val lastWorkerFailureType: String? = null,
     val activeWorkers: Int = 0,
     val maximumObservedBacklog: Int = 0,
+    val initializationBufferedCount: Long = 0,
+    val initializationOverflowCount: Long = 0,
+    val initializationBufferDepth: Int = 0,
+    val initializationMaximumBufferDepth: Int = 0,
 )
 
 interface CaptureDispatchDiagnostics {
@@ -32,9 +36,18 @@ interface CaptureDispatchDiagnostics {
     fun onWorkerFailure(failureType: String)
 }
 
+interface InitializationCaptureDiagnostics {
+    fun onInitializationBuffered(depth: Int)
+
+    fun onInitializationOverflow()
+
+    fun onInitializationBufferDrained()
+}
+
 class ListenerStatusRepository(
     private val clock: () -> Long = System::currentTimeMillis,
-) : CaptureDispatchDiagnostics {
+) : CaptureDispatchDiagnostics,
+    InitializationCaptureDiagnostics {
     private val mutableState = MutableStateFlow(ListenerStatus())
     val state: StateFlow<ListenerStatus> = mutableState.asStateFlow()
 
@@ -72,6 +85,24 @@ class ListenerStatusRepository(
                 lastWorkerFailureType = failureType,
             )
         }
+    }
+
+    override fun onInitializationBuffered(depth: Int) {
+        mutableState.update {
+            it.copy(
+                initializationBufferedCount = it.initializationBufferedCount + 1,
+                initializationBufferDepth = depth,
+                initializationMaximumBufferDepth = maxOf(it.initializationMaximumBufferDepth, depth),
+            )
+        }
+    }
+
+    override fun onInitializationOverflow() {
+        mutableState.update { it.copy(initializationOverflowCount = it.initializationOverflowCount + 1) }
+    }
+
+    override fun onInitializationBufferDrained() {
+        mutableState.update { it.copy(initializationBufferDepth = 0) }
     }
 }
 

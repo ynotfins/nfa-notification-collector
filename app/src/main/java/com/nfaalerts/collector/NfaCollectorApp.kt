@@ -86,6 +86,7 @@ class AppContainer(
     val postedNotificationCallback =
         PostedNotificationCallback(
             allowlistProvider = sourceSelections::snapshot,
+            selectionLoadStateProvider = { sourceSelections.loadState.value },
             eventIdFactory = { UUID.randomUUID().toString() },
             clock = System::currentTimeMillis,
             dispatcher =
@@ -94,11 +95,13 @@ class AppContainer(
                     processor = captureProcessor::process,
                     diagnostics = listenerStatus,
                 ),
+            initializationDiagnostics = listenerStatus,
         )
 
     fun initializeOnIo() {
         scope.launch(Dispatchers.IO) {
             sourceSelections.load()
+            postedNotificationCallback.onSelectionLoadCompleted()
             recoverDeliveryOnStartup()
         }
     }

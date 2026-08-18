@@ -88,6 +88,21 @@ class ListenerStatusRepositoryTest {
         assertEquals(workers.toLong(), status.state.value.dispatchedCount)
     }
 
+    @Test
+    fun `initialization buffer counters expose only safe queue status`() {
+        val status = ListenerStatusRepository(clock = { 1L })
+
+        status.onInitializationBuffered(1)
+        status.onInitializationBuffered(2)
+        status.onInitializationOverflow()
+        status.onInitializationBufferDrained()
+
+        assertEquals(2L, status.state.value.initializationBufferedCount)
+        assertEquals(1L, status.state.value.initializationOverflowCount)
+        assertEquals(0, status.state.value.initializationBufferDepth)
+        assertEquals(2, status.state.value.initializationMaximumBufferDepth)
+    }
+
     private fun request() =
         DispatchedNotification(
             eventId = "event",
