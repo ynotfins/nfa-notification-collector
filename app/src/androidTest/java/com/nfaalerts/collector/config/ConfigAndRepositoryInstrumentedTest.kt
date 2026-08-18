@@ -97,6 +97,54 @@ class ConfigAndRepositoryInstrumentedTest {
         }
 
     @Test
+    fun validCanonicalConfigIsAuthoritativeWhenValidLegacyAlsoExists() =
+        runBlocking {
+            val suffix = System.nanoTime()
+            val canonicalName = "collector-canonical-wins-$suffix.json"
+            val legacyName = "collector-valid-legacy-$suffix.json"
+            val canonical = File(context.filesDir, canonicalName)
+            val legacy = File(context.filesDir, legacyName)
+            val canonicalBytes = canonicalJson("com.example.canonical", "canonical-device")
+            try {
+                canonical.writeText(canonicalBytes)
+                legacy.writeText(legacyJson("com.example.legacy"))
+
+                val loaded = JsonSourceSelectionStore(context, canonicalName, legacyName).load()
+
+                assertEquals("com.example.canonical", loaded.single().packageName)
+                assertEquals(canonicalBytes, canonical.readText())
+                assertTrue(legacy.exists())
+            } finally {
+                canonical.delete()
+                legacy.delete()
+            }
+        }
+
+    @Test
+    fun validCanonicalConfigLoadsWhenCoexistingLegacyIsMalformed() =
+        runBlocking {
+            val suffix = System.nanoTime()
+            val canonicalName = "collector-canonical-malformed-legacy-$suffix.json"
+            val legacyName = "collector-malformed-legacy-$suffix.json"
+            val canonical = File(context.filesDir, canonicalName)
+            val legacy = File(context.filesDir, legacyName)
+            val canonicalBytes = canonicalJson("com.example.canonical", "canonical-device")
+            try {
+                canonical.writeText(canonicalBytes)
+                legacy.writeText("not-json")
+
+                val loaded = JsonSourceSelectionStore(context, canonicalName, legacyName).load()
+
+                assertEquals("com.example.canonical", loaded.single().packageName)
+                assertEquals(canonicalBytes, canonical.readText())
+                assertTrue(legacy.exists())
+            } finally {
+                canonical.delete()
+                legacy.delete()
+            }
+        }
+
+    @Test
     fun savingSourcesPreservesExistingCanonicalNonSecretFieldsAndUnknownVersionBytes() =
         runBlocking {
             val suffix = System.nanoTime()
@@ -177,4 +225,13 @@ class ConfigAndRepositoryInstrumentedTest {
             bnnMappingConfirmed = false,
             rawTextOrder = RawTextField.DEFAULT_ORDER,
         )
+
+    private fun canonicalJson(
+        packageName: String,
+        deviceId: String,
+    ) =
+        """{"configVersion":1,"deviceId":"$deviceId","sources":[{"appLabel":"Canonical","bnnMappingConfirmed":false,"enabled":true,"packageName":"$packageName","rawTextOrder":["bigText","text"],"sourceId":"other"}]}"""
+
+    private fun legacyJson(packageName: String) =
+        """{"version":1,"sources":[{"appLabel":"Legacy","bnnMappingConfirmed":false,"enabled":true,"packageName":"$packageName","rawTextOrder":["bigText","text"],"sourceId":"other"}]}"""
 }

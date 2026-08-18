@@ -26,6 +26,9 @@ class JsonSourceSelectionStore(
 
     override suspend fun load(): List<SourceSelection> =
         withContext(Dispatchers.IO) {
+            if (file.baseFile.exists()) {
+                return@withContext parseCanonical(read(file)).sources()
+            }
             migrateLegacyIfPresent()
             if (!file.baseFile.exists()) emptyList() else parseCanonical(read(file)).sources()
         }
