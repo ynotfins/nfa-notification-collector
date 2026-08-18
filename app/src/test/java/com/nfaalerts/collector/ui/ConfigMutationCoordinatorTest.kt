@@ -3,8 +3,10 @@ package com.nfaalerts.collector.ui
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigSaveResult
 import com.nfaalerts.collector.config.ConfigValidationError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ConfigMutationCoordinatorTest {
@@ -56,6 +58,29 @@ class ConfigMutationCoordinatorTest {
             assertEquals(ConfigMutationOutcome.Rejected(listOf(error)), outcome)
             assertEquals(listOf("persist"), calls)
         }
+
+    @Test
+    fun `cancellation from persistence is propagated`() {
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                coordinator(mutableListOf()).save { throw CancellationException("cancel") }
+            }
+        }
+    }
+
+    @Test
+    fun `cancellation from follow up is propagated`() {
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                ConfigMutationCoordinator(
+                    invalidateVerification = {},
+                    reloadSources = { throw CancellationException("cancel") },
+                    reloadUi = {},
+                    requeue = {},
+                ).save { ConfigSaveResult.Saved(CollectorConfigCodec().defaultDocument()) }
+            }
+        }
+    }
 
     private fun coordinator(
         calls: MutableList<String>,

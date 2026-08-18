@@ -316,6 +316,13 @@ private class FakeCollectorUiRepository(
 
     override suspend fun saveConfig(payload: String): List<ConfigValidationError> = emptyList()
 
+    override suspend fun saveSettings(
+        draft: com.nfaalerts.collector.ui.settings.SettingsDraft,
+    ): ConfigMutationOutcome {
+        formatted = draft.encodedPayload().decodeToString()
+        return ConfigMutationOutcome.Saved
+    }
+
     override suspend fun exportConfig(): ByteArray = ByteArray(0)
 
     override suspend fun importConfig(payload: ByteArray): List<ConfigValidationError> = emptyList()

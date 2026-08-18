@@ -3,6 +3,8 @@ package com.nfaalerts.collector.config
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
@@ -23,6 +25,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class ConfigAndRepositoryInstrumentedTest {
@@ -206,6 +209,28 @@ class ConfigAndRepositoryInstrumentedTest {
             assertEquals("NFA Notification Collector", app.label)
             assertNotNull(app.icon)
             assertEquals(InstalledAppClassifier.isSystem(flags), app.isSystem)
+        }
+
+    @Test
+    fun installedAppIconsAreCachedAcrossRepositoryReadsWithinBound() =
+        runBlocking {
+            val conversions = AtomicInteger()
+            val repository =
+                InstalledAppRepository(
+                    packageManager = context.packageManager,
+                    iconLoader = { info ->
+                        conversions.incrementAndGet()
+                        info.loadIcon(context.packageManager).toBitmap(16, 16).asImageBitmap()
+                    },
+                    maximumCachedIcons = 512,
+                )
+
+            repository.installedApps()
+            val afterFirst = conversions.get()
+            repository.installedApps()
+
+            assertEquals(afterFirst, conversions.get())
+            assertTrue(repository.cachedIconCount in 1..512)
         }
 
     @Test

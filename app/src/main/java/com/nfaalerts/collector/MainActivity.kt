@@ -1,6 +1,7 @@
 package com.nfaalerts.collector
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -10,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.nfaalerts.collector.ui.AppContainerUiRepository
 import com.nfaalerts.collector.ui.CollectorHomeScreen
 import com.nfaalerts.collector.ui.theme.NfaCollectorTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,57 +23,69 @@ class MainActivity : ComponentActivity() {
     private val importConfig =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri ?: return@registerForActivityResult
-            lifecycleScope.launch {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val input = contentResolver.openInputStream(uri)
-                        if (input == null) {
-                            uiRepository.reportImportFailure()
-                            return@withContext
-                        }
-                        input.use {
-                            val payload = it.readBounded(MAX_CONFIG_BYTES + 1)
-                            try {
-                                if (payload.size <= MAX_CONFIG_BYTES) {
-                                    uiRepository.importConfig(payload)
-                                } else {
-                                    uiRepository.reportImportOversize()
-                                }
-                            } finally {
-                                payload.fill(0)
-                            }
-                        }
-                    } catch (_: Exception) {
-                        uiRepository.reportImportFailure()
-                    }
-                }
-            }
+            importConfiguration(uri)
         }
     private val exportConfig =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             uri ?: return@registerForActivityResult
-            lifecycleScope.launch {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val payload = uiRepository.exportConfig()
+            exportConfiguration(uri)
+        }
+
+    internal fun importConfiguration(uri: Uri) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val input = contentResolver.openInputStream(uri)
+                    if (input == null) {
+                        uiRepository.reportImportFailure()
+                        return@withContext
+                    }
+                    input.use {
+                        val payload = it.readBounded(MAX_CONFIG_BYTES + 1)
                         try {
-                            require(payload.size <= MAX_CONFIG_BYTES) { "CONFIG_PAYLOAD_LIMIT" }
-                            val output = contentResolver.openOutputStream(uri)
-                            if (output == null) {
-                                uiRepository.reportExportFailed()
+                            if (payload.size <= MAX_CONFIG_BYTES) {
+                                uiRepository.importConfig(payload)
                             } else {
-                                output.use { it.write(payload) }
-                                uiRepository.reportExportSucceeded()
+                                uiRepository.reportImportOversize()
                             }
                         } finally {
                             payload.fill(0)
                         }
-                    } catch (_: Exception) {
-                        uiRepository.reportExportFailed()
                     }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    uiRepository.reportImportFailure()
                 }
             }
         }
+    }
+
+    internal fun exportConfiguration(uri: Uri) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val payload = uiRepository.exportConfig()
+                    try {
+                        require(payload.size <= MAX_CONFIG_BYTES) { "CONFIG_PAYLOAD_LIMIT" }
+                        val output = contentResolver.openOutputStream(uri)
+                        if (output == null) {
+                            uiRepository.reportExportFailed()
+                        } else {
+                            output.use { it.write(payload) }
+                            uiRepository.reportExportSucceeded()
+                        }
+                    } finally {
+                        payload.fill(0)
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    uiRepository.reportExportFailed()
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

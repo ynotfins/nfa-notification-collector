@@ -2,6 +2,7 @@ package com.nfaalerts.collector.config
 
 import android.content.Context
 import android.util.AtomicFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,26 +42,33 @@ sealed interface ConfigLoadResult {
 class CollectorConfigRepository(
     context: Context,
     fileName: String = FILE_NAME,
+    private val executionChecker: () -> Unit = {},
     private val afterBytesWritten: () -> Unit = {},
 ) {
     private val file = AtomicFile(File(context.filesDir, fileName))
     private val codec = CollectorConfigCodec()
     private val mutex = mutexes.computeIfAbsent(file.baseFile.absolutePath) { Mutex() }
 
-    suspend fun load(): ConfigLoadResult = locked(::loadLocked)
-
-    suspend fun savePayload(payload: ByteArray): ConfigSaveResult {
-        val decoded = codec.decode(payload)
-        return when (decoded) {
-            is ConfigDecodeResult.Invalid -> ConfigSaveResult.Rejected(decoded.errors)
-            is ConfigDecodeResult.Valid -> locked { writeLocked(decoded.document) }
+    suspend fun load(): ConfigLoadResult =
+        locked {
+            executionChecker()
+            loadLocked()
         }
-    }
+
+    suspend fun savePayload(payload: ByteArray): ConfigSaveResult =
+        locked {
+            executionChecker()
+            when (val decoded = codec.decode(payload)) {
+                is ConfigDecodeResult.Invalid -> ConfigSaveResult.Rejected(decoded.errors)
+                is ConfigDecodeResult.Valid -> writeLocked(decoded.document)
+            }
+        }
 
     suspend fun importPayload(payload: ByteArray): ConfigSaveResult = savePayload(payload)
 
     suspend fun exportPayload(): ByteArray =
         locked {
+            executionChecker()
             when (val loaded = loadLocked()) {
                 is ConfigLoadResult.Loaded -> codec.exportPayload(loaded.document)
                 ConfigLoadResult.Missing -> codec.exportPayload(codec.defaultDocument())
@@ -71,6 +79,7 @@ class CollectorConfigRepository(
 
     suspend fun updateRoot(transform: (JsonObject) -> JsonObject): ConfigSaveResult =
         locked {
+            executionChecker()
             val current =
                 when (val loaded = loadLocked()) {
                     is ConfigLoadResult.Loaded -> loaded.document
@@ -121,6 +130,7 @@ class CollectorConfigRepository(
     }
 
     private fun writeLocked(document: CollectorConfigDocument): ConfigSaveResult {
+        executionChecker()
         val payload =
             try {
                 codec.exportPayload(document)
@@ -145,6 +155,9 @@ class CollectorConfigRepository(
                 is ConfigLoadResult.Invalid -> ConfigSaveResult.Rejected(reopened.errors)
                 else -> ConfigSaveResult.IoFailure
             }
+        } catch (cancellation: CancellationException) {
+            file.failWrite(stream)
+            throw cancellation
         } catch (_: Throwable) {
             file.failWrite(stream)
             ConfigSaveResult.IoFailure

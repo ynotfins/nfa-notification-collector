@@ -140,7 +140,15 @@ fun SourcePickerScreen(
     }
 
     editing?.let { source ->
-        SourceEditorDialog(source, repository::upsert) { editing = null }
+        SourceEditorDialog(
+            source = source,
+            save = repository::upsert,
+            accepted = {
+                mutationError = null
+                editing = null
+            },
+            dismiss = { editing = null },
+        )
     }
     pendingBnn?.let { app ->
         AlertDialog(
@@ -173,6 +181,7 @@ fun SourcePickerScreen(
 private fun SourceEditorDialog(
     source: SourceSelection,
     save: suspend (SourceSelection) -> SelectionUpdate,
+    accepted: () -> Unit,
     dismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -243,7 +252,7 @@ private fun SourceEditorDialog(
                             ),
                         )
                     error = result.safeError()
-                    if (result is SelectionUpdate.Accepted) dismiss()
+                    if (result is SelectionUpdate.Accepted) accepted()
                 }
             }) { Text("Save source") }
         },

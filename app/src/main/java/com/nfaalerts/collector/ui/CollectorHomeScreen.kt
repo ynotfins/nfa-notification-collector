@@ -331,7 +331,7 @@ private fun SettingsScreen(
     var addProfilePath by rememberSaveable { mutableStateOf("/v1/ingest/alerts") }
     val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
     val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
-    LaunchedEffect(repository) {
+    LaunchedEffect(repository, snapshot.canonicalConfigRevision) {
         draft = repository.settingsDraft()
         editor = repository.formattedConfig()
     }
@@ -507,9 +507,13 @@ private fun SettingsScreen(
         item {
             TextButton(onClick = {
                 scope.launch {
-                    draft = repository.defaultSettingsDraft()
-                    editor = repository.defaultFormattedConfig()
-                    resultText = "Approved defaults loaded. Save to apply."
+                    val defaults = repository.defaultSettingsDraft()
+                    val outcome = repository.saveSettings(defaults)
+                    resultText = outcome.safeMessage()
+                    if (outcome.persisted) {
+                        draft = repository.settingsDraft()
+                        editor = repository.formattedConfig()
+                    }
                 }
             }) { Text("Reset to approved defaults") }
         }

@@ -1,8 +1,11 @@
 package com.nfaalerts.collector.config
 
+import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class AtomicCollectorConfigStoreInstrumentedTest {
@@ -88,6 +92,32 @@ class AtomicCollectorConfigStoreInstrumentedTest {
                 assertArrayEquals(before, file.readBytes())
             } finally {
                 file.delete()
+            }
+        }
+
+    @Test
+    fun savePayloadDecodeValidationAndWriteRunBehindIoBoundary() =
+        runBlocking {
+            val name = "atomic-boundary-${System.nanoTime()}.json"
+            val checks = AtomicInteger()
+            val store =
+                AtomicCollectorConfigStore(
+                    context = context,
+                    fileName = name,
+                    executionChecker = {
+                        assertFalse(Looper.myLooper() == Looper.getMainLooper())
+                        checks.incrementAndGet()
+                    },
+                )
+            try {
+                val payload = CollectorConfigCodec().exportPayload(CollectorConfigCodec().defaultDocument())
+
+                val result = withContext(Dispatchers.Main) { store.savePayload(payload) }
+
+                assertTrue(result is ConfigSaveResult.Saved)
+                assertTrue(checks.get() >= 2)
+            } finally {
+                File(context.filesDir, name).delete()
             }
         }
 }

@@ -2,6 +2,7 @@ package com.nfaalerts.collector.ui
 
 import com.nfaalerts.collector.config.ConfigSaveResult
 import com.nfaalerts.collector.config.ConfigValidationError
+import kotlinx.coroutines.CancellationException
 
 sealed interface ConfigMutationOutcome {
     data object Saved : ConfigMutationOutcome
@@ -26,7 +27,15 @@ class ConfigMutationCoordinator(
 ) {
     suspend fun save(persist: suspend () -> ConfigSaveResult): ConfigMutationOutcome {
         onPersist()
-        return when (val result = runCatching { persist() }.getOrElse { return ConfigMutationOutcome.SaveFailed }) {
+        val result =
+            try {
+                persist()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return ConfigMutationOutcome.SaveFailed
+            }
+        return when (result) {
             is ConfigSaveResult.Rejected -> ConfigMutationOutcome.Rejected(result.errors)
             ConfigSaveResult.IoFailure -> ConfigMutationOutcome.SaveFailed
             is ConfigSaveResult.Saved -> afterSaved()
@@ -35,12 +44,22 @@ class ConfigMutationCoordinator(
 
     private suspend fun afterSaved(): ConfigMutationOutcome {
         invalidateVerification()
-        runCatching { reloadSources() }
-            .getOrElse { return ConfigMutationOutcome.SavedFollowUpPending("SOURCE_RELOAD_PENDING") }
-        runCatching { reloadUi() }
-            .getOrElse { return ConfigMutationOutcome.SavedFollowUpPending("UI_RELOAD_PENDING") }
-        runCatching { requeue() }
-            .getOrElse { return ConfigMutationOutcome.SavedFollowUpPending("DELIVERY_REQUEUE_PENDING") }
+        followUp("SOURCE_RELOAD_PENDING", reloadSources)?.let { return it }
+        followUp("UI_RELOAD_PENDING", reloadUi)?.let { return it }
+        followUp("DELIVERY_REQUEUE_PENDING", requeue)?.let { return it }
         return ConfigMutationOutcome.Saved
     }
+
+    private suspend fun followUp(
+        code: String,
+        block: suspend () -> Unit,
+    ): ConfigMutationOutcome.SavedFollowUpPending? =
+        try {
+            block()
+            null
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            ConfigMutationOutcome.SavedFollowUpPending(code)
+        }
 }

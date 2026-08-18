@@ -147,6 +147,7 @@ class AppContainerUiRepository internal constructor(
                 loading = config == null || core.bearer == null,
                 notificationAccessState = access,
                 connectivityState = connectivity,
+                canonicalConfigRevision = config?.revisionHash.orEmpty(),
                 liveVerificationFingerprint = currentKey,
             )
         }.stateIn(
@@ -273,9 +274,14 @@ class AppContainerUiRepository internal constructor(
 
     override suspend fun validateConfig(payload: String): List<ConfigValidationError> =
         withContext(Dispatchers.Default) {
-            when (val decoded = CollectorConfigCodec().decode(payload.encodeToByteArray())) {
-                is com.nfaalerts.collector.config.ConfigDecodeResult.Valid -> emptyList()
-                is com.nfaalerts.collector.config.ConfigDecodeResult.Invalid -> decoded.errors
+            val bytes = payload.encodeToByteArray()
+            try {
+                when (val decoded = CollectorConfigCodec().decode(bytes)) {
+                    is com.nfaalerts.collector.config.ConfigDecodeResult.Valid -> emptyList()
+                    is com.nfaalerts.collector.config.ConfigDecodeResult.Invalid -> decoded.errors
+                }
+            } finally {
+                bytes.fill(0)
             }
         }
 

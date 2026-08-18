@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.LinkedHashMap
 
 data class InstalledApp(
     val packageName: String,
@@ -41,7 +42,17 @@ object InstalledAppClassifier {
 
 class InstalledAppRepository(
     private val packageManager: PackageManager,
+    private val iconLoader: (ApplicationInfo) -> ImageBitmap? = { info ->
+        runCatching {
+            info.loadIcon(packageManager).toBitmap(width = 48, height = 48).asImageBitmap()
+        }.getOrNull()
+    },
+    private val maximumCachedIcons: Int = 512,
 ) {
+    private val iconCache = LinkedHashMap<String, ImageBitmap>(16, 0.75f, true)
+    internal val cachedIconCount: Int
+        get() = synchronized(iconCache) { iconCache.size }
+
     suspend fun installedApps(): List<InstalledApp> =
         withContext(Dispatchers.IO) {
             packageManager
@@ -51,13 +62,25 @@ class InstalledAppRepository(
                         packageName = info.packageName,
                         label = packageManager.getApplicationLabel(info).toString(),
                         flags = info.flags,
-                        icon =
-                            runCatching {
-                                info.loadIcon(packageManager).toBitmap(width = 48, height = 48).asImageBitmap()
-                            }.getOrNull(),
+                        icon = cachedIcon(info),
                     )
                 }
         }
+
+    private fun cachedIcon(info: ApplicationInfo): ImageBitmap? {
+        synchronized(iconCache) { iconCache[info.packageName]?.let { return it } }
+        val loaded = iconLoader(info) ?: return null
+        synchronized(iconCache) {
+            iconCache[info.packageName] = loaded
+            while (iconCache.size > maximumCachedIcons) {
+                iconCache.entries.iterator().run {
+                    next()
+                    remove()
+                }
+            }
+        }
+        return loaded
+    }
 }
 
 @Suppress("DEPRECATION")

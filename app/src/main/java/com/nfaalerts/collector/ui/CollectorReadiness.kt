@@ -93,6 +93,7 @@ data class CollectorUiSnapshot(
     val loading: Boolean = false,
     val notificationAccessState: NotificationAccessState = NotificationAccessState.Unknown,
     val connectivityState: ConnectivityState = ConnectivityState.Unknown,
+    val canonicalConfigRevision: String = "",
     internal val liveVerificationFingerprint: LiveVerificationFingerprint? = null,
 ) {
     val guidedStep: GuidedSetupStep

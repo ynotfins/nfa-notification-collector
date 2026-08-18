@@ -93,6 +93,11 @@ class SourcePickerScreenInstrumentedTest {
         composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Maximum 10 sources"))
         composeRule.onNodeWithText("Maximum 10 sources").assertIsDisplayed()
         composeRule.onNodeWithText("10 / 10").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("edit-source-com.user.0"))
+        composeRule.onNodeWithTag("edit-source-com.user.0").performClick()
+        composeRule.onNodeWithText("Save source").performClick()
+        composeRule.onNodeWithText("Maximum 10 sources").assertDoesNotExist()
     }
 
     @Test

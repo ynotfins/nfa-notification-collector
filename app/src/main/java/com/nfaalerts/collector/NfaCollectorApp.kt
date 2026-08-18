@@ -51,9 +51,9 @@ class AppContainer(
     },
     val deliveryScheduler: DeliveryWorkScheduler = DeliveryWorkScheduler(application.applicationContext),
     private val clock: () -> Long = System::currentTimeMillis,
+    internal val configStore: AtomicCollectorConfigStore = AtomicCollectorConfigStore(application.applicationContext),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    internal val configStore = AtomicCollectorConfigStore(application.applicationContext)
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
