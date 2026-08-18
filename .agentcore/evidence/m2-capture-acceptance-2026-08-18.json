@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-18T11:14:30.9921477Z",
+  "milestone": "M2",
+  "status": "passed",
+  "project_key": "nfa-notification-collector",
+  "commits": [
+    "8fc17ac95e31ce22604cc5865e5645967ffbd5d1",
+    "e1297cc43d60de18a2bc2b6a9c164ef5ded7f89d",
+    "56a56147a4f1037ec7239453a7b0dd931ef3c755",
+    "c69f8c15707e89b974c8cce271802208f4e9e1a9",
+    "0a23b7a3058d7cd73525bff0e26aa39d5fa466ea"
+  ],
+  "verification": {
+    "jvm_tests": {"total": 40, "failed": 0, "errors": 0, "skipped": 0},
+    "api36_instrumentation": {"total": 17, "failed": 0, "skipped": 0},
+    "compose_picker_tests": {"total": 3, "failed": 0},
+    "ktlint": "PASS",
+    "android_lint_errors": 0,
+    "android_test_compile_warnings": 0,
+    "debug_assemble": "PASS",
+    "repository_hygiene": "PASS",
+    "room_schema_tables": ["capture_retention_tombstones", "captured_notifications", "delivery_outbox", "diagnostic_events"]
+  },
+  "emulator": {
+    "avd": "Pixel_8_API_36",
+    "serial_during_test": "emulator-5554",
+    "android_release": "16",
+    "api": 36,
+    "tests": 17,
+    "callback_dispatches": 10000,
+    "accepted_timing_ns": 79516568,
+    "stopped_after_test": true
+  },
+  "contracts": {
+    "posted_callbacks_only": true,
+    "unique_event_per_post": true,
+    "max_selected_apps": 10,
+    "non_bnn_state": "BLOCKED_CONTRACT",
+    "bnn_state": "PENDING",
+    "raw_text_normalized": false,
+    "binary_or_pending_intent_serialized": false,
+    "capture_update_dao_present": false,
+    "canonical_config_file": "collector-config.json"
+  },
+  "review": {
+    "initial_spec_verdict": "REJECTED",
+    "initial_quality_verdict": "REJECTED",
+    "fix_rounds": 4,
+    "final_spec_verdict": "APPROVED",
+    "final_quality_verdict": "APPROVED"
+  },
+  "accepted_limitations": [
+    {
+      "code": "PRE_ROOM_PROCESS_DEATH_WINDOW",
+      "detail": "No zero-loss claim is made between callback return and the first Room transaction; blocking main-thread persistence is forbidden."
+    },
+    {
+      "code": "API26_TO_35_RUNTIME_NOT_EXECUTED",
+      "detail": "API guards are lint-clean; runtime instrumentation was performed only on API 36."
+    },
+    {
+      "code": "PHYSICAL_DEVICE_PENDING",
+      "detail": "No Samsung, real BNN, bearer, Notification Access or Tailscale acceptance was performed."
+    },
+    {
+      "code": "PROTECTED_MARKDOWN_PROJECTION_PENDING",
+      "detail": "Protected milestone/acceptance Markdown requires a live AUTH capability; canonical checklist and memory are current."
+    }
+  ],
+  "remote_present": true,
+  "remote_push_approved": false
+}
