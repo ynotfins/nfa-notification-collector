@@ -1,0 +1,115 @@
+@file:Suppress("DEPRECATION")
+
+package com.nfaalerts.collector.capture
+
+import android.app.Notification
+import android.app.RemoteInput
+import android.os.Build
+import android.os.Bundle
+
+data class AndroidNotificationSnapshot(
+    val envelopeValues: Map<String, Any?>,
+    val rawTextSelection: RawTextSelection,
+)
+
+object AndroidNotificationReader {
+    fun read(
+        notification: Notification,
+        rawTextOrder: List<RawTextField>,
+    ): AndroidNotificationSnapshot {
+        val extras = notification.extras ?: Bundle.EMPTY
+        val candidates =
+            mapOf(
+                RawTextField.BIG_TEXT to extras.strings(Notification.EXTRA_BIG_TEXT),
+                RawTextField.TEXT to extras.strings(Notification.EXTRA_TEXT),
+                RawTextField.TEXT_LINES to extras.stringArray(Notification.EXTRA_TEXT_LINES),
+                RawTextField.TICKER to listOfNotNull(notification.tickerText?.toString()),
+            )
+        val rawText = RawTextSelector.select(rawTextOrder, candidates)
+        return AndroidNotificationSnapshot(
+            envelopeValues =
+                mapOf(
+                    "actions" to notification.actions?.map(::safeAction).orEmpty(),
+                    "audioAttributes" to notification.audioAttributes?.toString(),
+                    "badgeIconType" to notification.badgeIconType,
+                    "category" to notification.category,
+                    "channelId" to notification.channelId,
+                    "color" to notification.color,
+                    "contentIntent" to notification.contentIntent,
+                    "defaults" to notification.defaults,
+                    "deleteIntent" to notification.deleteIntent,
+                    "extras" to extras,
+                    "flags" to notification.flags,
+                    "group" to notification.group,
+                    "groupAlertBehavior" to notification.groupAlertBehavior,
+                    "largeIcon" to notification.getLargeIcon(),
+                    "localOnly" to (notification.flags and Notification.FLAG_LOCAL_ONLY != 0),
+                    "messages" to safeMessages(extras),
+                    "number" to notification.number,
+                    "priority" to notification.priority,
+                    "publicVersionPresent" to (notification.publicVersion != null),
+                    "shortcutId" to notification.shortcutId,
+                    "showWhen" to extras.getBoolean(Notification.EXTRA_SHOW_WHEN, true),
+                    "smallIcon" to notification.smallIcon,
+                    "sortKey" to notification.sortKey,
+                    "timeoutAfter" to notification.timeoutAfter,
+                    "tickerText" to notification.tickerText,
+                    "usesChronometer" to extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER),
+                    "visibility" to notification.visibility,
+                    "whenEpochMillis" to notification.`when`,
+                ),
+            rawTextSelection = rawText,
+        )
+    }
+
+    private fun safeAction(action: Notification.Action): SafeActionValue =
+        SafeActionValue(
+            title = action.title?.toString(),
+            semanticAction =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    action.semanticAction
+                } else {
+                    Notification.Action.SEMANTIC_ACTION_NONE
+                },
+            showsUserInterface = null,
+            authenticationRequired =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    action.isAuthenticationRequired
+                } else {
+                    false
+                },
+            remoteInputs = action.remoteInputs?.map(::safeRemoteInput).orEmpty(),
+            hasPendingIntent = action.actionIntent != null,
+        )
+
+    private fun safeRemoteInput(input: RemoteInput): SafeRemoteInputValue =
+        SafeRemoteInputValue(
+            resultKey = input.resultKey,
+            label = input.label?.toString(),
+            allowFreeFormInput = input.allowFreeFormInput,
+            allowedDataTypes = input.allowedDataTypes.toSet(),
+        )
+
+    private fun safeMessages(extras: Bundle): List<SafeMessageValue> {
+        val bundles = extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return emptyList()
+        return bundles.mapNotNull { value ->
+            (value as? Bundle)?.let { message ->
+                SafeMessageValue(
+                    text = message.getCharSequence(MESSAGE_TEXT)?.toString(),
+                    timestampEpochMillis = message.getLong(MESSAGE_TIME),
+                    sender = message.getCharSequence(MESSAGE_SENDER)?.toString(),
+                )
+            }
+        }
+    }
+
+    private const val MESSAGE_TEXT = "text"
+    private const val MESSAGE_TIME = "time"
+    private const val MESSAGE_SENDER = "sender"
+
+    private fun Bundle.strings(key: String): List<String> =
+        listOfNotNull(runCatching { getCharSequence(key)?.toString() }.getOrNull())
+
+    private fun Bundle.stringArray(key: String): List<String> =
+        runCatching { getCharSequenceArray(key)?.map(CharSequence::toString).orEmpty() }.getOrDefault(emptyList())
+}
