@@ -6,7 +6,7 @@
 
 **Architecture:** One Android application module uses a real notification listener, application-owned capture dispatcher, canonical safe serializer, Room capture/outbox database, Android Keystore bearer store, database-driven WorkManager drain, deterministic bounded wire projection, and Compose UI. Server/database authority remains external and unchanged.
 
-**Tech Stack:** Kotlin, AGP 9.2.1, Gradle 9.4.1, JDK 17, Android API 36, Compose Material 3, Room 3, WorkManager, coroutines/Flow, kotlinx JSON, OkHttp, Android Keystore AES-GCM.
+**Tech Stack:** Kotlin, AGP 9.2.1, Gradle 9.4.1, JDK 17, Android API 36, Compose Material 3, Lifecycle 2.10.0, Room 3, WorkManager, coroutines/Flow, kotlinx JSON, OkHttp, Android Keystore AES-GCM.
 
 **Spec:** `docs/superpowers/specs/2026-08-18-nfa-notification-collector-design.md`
 
@@ -18,6 +18,7 @@
 - Top-level schema-v1 source remains `bnn`; non-BNN events remain local `BLOCKED_CONTRACT`.
 - No production code is written before its failing test is observed, except generated/configuration scaffolding.
 - Existing managed documentation uses documentation guard/maintainer governance. Generated AgentCore projections are never hand edited.
+- Lifecycle version is pinned to 2.10.0; 2.11.0 is excluded.
 - Each milestone ends with deterministic tests, independent review, hygiene scan, rollback evidence, local commit, memory/handoff checkpoint, and tool audit. Do not push the existing unapproved remote.
 
 ## Task 0: Close M0 planning gate

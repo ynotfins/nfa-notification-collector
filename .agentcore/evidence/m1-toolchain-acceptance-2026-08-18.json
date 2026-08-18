@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-08-18T09:13:19.7589963Z",
+  "milestone": "M1",
+  "status": "passed",
+  "project_key": "nfa-notification-collector",
+  "branch": "main",
+  "commits": [
+    "b0487b1abf374ebbb5abad72121dae32a3cd6c9d",
+    "73d9aa671d3a07d46222b82e063665af282a9715",
+    "92850f572479fb59d1e734f71cff38bc2291c6f3"
+  ],
+  "toolchain": {
+    "compile_sdk": 36,
+    "target_sdk": 36,
+    "min_sdk": 26,
+    "build_tools": "36.0.0",
+    "agp": "9.2.1",
+    "gradle": "9.4.1",
+    "launcher_jvm": "17.0.16",
+    "lifecycle": "2.10.0",
+    "wrapper_jar_sha256": "55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c",
+    "distribution_sha256": "2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb"
+  },
+  "verification": {
+    "jdk_java_and_javac_gate": "PASS",
+    "jvm_tests": "PASS",
+    "ktlint": "PASS",
+    "android_lint_errors": 0,
+    "debug_assemble": "PASS",
+    "two_clean_debug_builds": "PASS",
+    "hygiene_self_test": "PASS",
+    "repository_hygiene": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "review": {
+    "initial_spec_verdict": "REJECTED",
+    "initial_quality_verdict": "REJECTED",
+    "fix_rounds": 2,
+    "final_spec_verdict": "APPROVED",
+    "final_quality_verdict": "APPROVED"
+  },
+  "security_contract": {
+    "query_all_packages_scope": "debug_manifest_only",
+    "backup_disabled": true,
+    "cloud_and_device_transfer_excluded": true,
+    "cleartext_disabled": true,
+    "active_secret_values_found_in_tracked_files": 0,
+    "sqlite_database_and_sidecars_rejected": true,
+    "notification_capture_artifacts_rejected": true
+  },
+  "residuals": [
+    {
+      "code": "PROTECTED_MARKDOWN_PROJECTION_PENDING",
+      "detail": "M0/M1 protected Markdown projections require a live AUTH approval capability; canonical checklist state and AgentCore memory are current and the protected files were not bypassed."
+    },
+    {
+      "code": "DEVICE_ACCEPTANCE_PENDING",
+      "detail": "No authorized Samsung device was connected; only device-specific acceptance remains pending."
+    }
+  ],
+  "remote_present": true,
+  "remote_push_approved": false
+}

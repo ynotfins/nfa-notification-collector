@@ -18,10 +18,12 @@ The collector repository is the only write root. `D:\github\agentcore-control-pl
 
 - `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26`, Build Tools `36.0.0`.
 - Android Gradle Plugin `9.2.1`, Gradle `9.4.1`, external JDK 17, AGP built-in Kotlin, Compose compiler `2.3.10`, KSP `2.3.10`.
-- Compose BOM `2026.06.00`, Activity Compose `1.13.0`, Lifecycle `2.11.0`, Navigation Compose `2.9.8`.
+- Compose BOM `2026.06.00`, Activity Compose `1.13.0`, Lifecycle `2.10.0`, Navigation Compose `2.9.8`.
 - Room 3 `3.0.1`, SQLite Framework `2.7.0`, WorkManager `2.11.2`.
 - Coroutines `1.11.0`, kotlinx-serialization JSON `1.11.0`, OkHttp/MockWebServer `5.3.0`.
 - Ktlint Gradle plugin `14.2.0`, ktlint `1.8.0`.
+
+Lifecycle 2.11.0 AAR metadata requires compileSdk 37; the verified 2.10.0 artifact is compatible with compileSdk 36.
 
 All Gradle execution goes through a repository script that validates `JAVA_HOME` resolves to JDK 17. PATH Java 21 is never trusted implicitly.
 
