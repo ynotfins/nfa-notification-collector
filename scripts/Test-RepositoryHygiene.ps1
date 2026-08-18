@@ -1,8 +1,11 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
+    [hashtable]$TestSecretValues = @{}
+)
 
 $ErrorActionPreference = 'Stop'
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$repositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 $expectedDebugManifest = 'app/src/debug/androidmanifest.xml'
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
 $expectedDomains = [System.Collections.Generic.HashSet[string]]::new([string[]]@('database', 'sharedpref', 'file', 'root', 'external'))
@@ -12,22 +15,33 @@ function Add-Error([string]$path, [string]$error) {
     $errors.Add("${path}:error=$error")
 }
 
-function Read-Xml([string]$relativePath) {
-    $absolutePath = Join-Path $repositoryRoot $relativePath
+function Read-XmlFile([string]$absolutePath, [string]$displayPath) {
     if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
-        Add-Error $relativePath 'missing'
+        Add-Error $displayPath 'missing'
         return $null
     }
 
     try {
-        $document = [System.Xml.XmlDocument]::new()
-        $document.XmlResolver = $null
-        $document.Load($absolutePath)
-        return $document
+        $settings = [System.Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [System.Xml.XmlReader]::Create($absolutePath, $settings)
+        try {
+            $document = [System.Xml.XmlDocument]::new()
+            $document.XmlResolver = $null
+            $document.Load($reader)
+            return $document
+        } finally {
+            $reader.Dispose()
+        }
     } catch {
-        Add-Error $relativePath 'invalid_xml'
+        Add-Error $displayPath 'invalid_xml'
         return $null
     }
+}
+
+function Read-RepositoryXml([string]$relativePath) {
+    return Read-XmlFile (Join-Path $repositoryRoot $relativePath) $relativePath
 }
 
 function Test-ExcludeDomains([System.Xml.XmlElement]$section, [string]$relativePath, [string]$sectionName) {
@@ -50,9 +64,16 @@ function Get-QueryAllPackagesPermissionCount([System.Xml.XmlDocument]$document) 
     $namespaceManager = [System.Xml.XmlNamespaceManager]::new($document.NameTable)
     $namespaceManager.AddNamespace('android', $androidNamespace)
     return $document.SelectNodes(
-        '/manifest/uses-permission[@android:name="android.permission.QUERY_ALL_PACKAGES"]',
+        '/*[local-name()="manifest"]/*[starts-with(local-name(), "uses-permission") and @android:name="android.permission.QUERY_ALL_PACKAGES"]',
         $namespaceManager
     ).Count
+}
+
+function Get-SecretValue([string]$secretName) {
+    if ($TestSecretValues.ContainsKey($secretName)) {
+        return [string]$TestSecretValues[$secretName]
+    }
+    return [Environment]::GetEnvironmentVariable($secretName, 'User')
 }
 
 function Test-TrackedFiles {
@@ -60,7 +81,9 @@ function Test-TrackedFiles {
         '(^|/)\.env[^/]*$',
         '(^|/)local\.properties$',
         '\.(jks|keystore|p12)$',
-        '\.(db|sqlite|sqlite3)$',
+        '(?i)\.(db|sqlite|sqlite3)(-(wal|shm))?$',
+        '(?i)(^|/)(captures|notification-captures|captured-notifications)(/|$)',
+        '(?i)(^|/)[^/]*(real[-_]?notification|notification[-_]?capture|captured[-_]?notification)[^/]*\.(json|txt|xml|csv|log)$',
         '\.(apk|aab)$',
         '(^|/)(\.gradle|\.idea|build)(/|$)'
     )
@@ -75,10 +98,15 @@ function Test-TrackedFiles {
         }
     }
 
-    $secretNames = @('NFA_COLLECTOR_BEARER', 'NFA_INGEST_BEARER', 'NFA_INGEST_TOKEN')
+    $secretNames = @(
+        'NFA_COLLECTOR_BEARER',
+        'NFA_INGEST_BEARER',
+        'NFA_INGEST_DEVICE_BEARER_CURRENT',
+        'NFA_INGEST_TOKEN'
+    )
     $sourceFiles = $trackedFiles | Where-Object { $_ -notmatch '\.(jar|png|jpg|jpeg|gif|webp|ico)$' }
     foreach ($secretName in $secretNames) {
-        $secret = [Environment]::GetEnvironmentVariable($secretName, 'User')
+        $secret = Get-SecretValue $secretName
         if ([string]::IsNullOrEmpty($secret)) {
             continue
         }
@@ -94,16 +122,15 @@ function Test-TrackedFiles {
 
 Get-ChildItem -LiteralPath $repositoryRoot -Recurse -Filter AndroidManifest.xml | ForEach-Object {
     $relativePath = [IO.Path]::GetRelativePath($repositoryRoot, $_.FullName).Replace('\', '/').ToLowerInvariant()
-    if ($relativePath -notmatch '(^|/)(build|\.gradle)/') {
-        $content = Get-Content -LiteralPath $_.FullName -Raw
-        if ($content.Contains('android.permission.QUERY_ALL_PACKAGES') -and $relativePath -ne $expectedDebugManifest) {
-            Add-Error $relativePath 'query_all_packages_outside_debug'
-        }
+    $manifest = Read-XmlFile $_.FullName $relativePath
+    if ($null -ne $manifest -and $relativePath -notmatch '(^|/)(build|\.gradle)/' -and
+        (Get-QueryAllPackagesPermissionCount $manifest) -gt 0 -and $relativePath -ne $expectedDebugManifest) {
+        Add-Error $relativePath 'query_all_packages_outside_debug'
     }
 }
 
 $mainManifestPath = 'app/src/main/AndroidManifest.xml'
-$mainManifest = Read-Xml $mainManifestPath
+$mainManifest = Read-RepositoryXml $mainManifestPath
 if ($null -ne $mainManifest) {
     $application = $mainManifest.DocumentElement.SelectSingleNode('./application')
     if ($null -eq $application) {
@@ -127,19 +154,19 @@ if ($null -ne $mainManifest) {
 }
 
 $debugManifestPath = 'app/src/debug/AndroidManifest.xml'
-$debugManifest = Read-Xml $debugManifestPath
+$debugManifest = Read-RepositoryXml $debugManifestPath
 if ($null -ne $debugManifest -and (Get-QueryAllPackagesPermissionCount $debugManifest) -ne 1) {
     Add-Error $debugManifestPath 'query_all_packages_count'
 }
 
 $backupRulesPath = 'app/src/main/res/xml/backup_rules.xml'
-$backupRules = Read-Xml $backupRulesPath
+$backupRules = Read-RepositoryXml $backupRulesPath
 if ($null -ne $backupRules) {
     Test-ExcludeDomains $backupRules.DocumentElement $backupRulesPath 'legacy'
 }
 
 $extractionRulesPath = 'app/src/main/res/xml/data_extraction_rules.xml'
-$extractionRules = Read-Xml $extractionRulesPath
+$extractionRules = Read-RepositoryXml $extractionRulesPath
 if ($null -ne $extractionRules) {
     Test-ExcludeDomains ($extractionRules.DocumentElement.SelectSingleNode('./cloud-backup')) $extractionRulesPath 'cloud_backup'
     Test-ExcludeDomains ($extractionRules.DocumentElement.SelectSingleNode('./device-transfer')) $extractionRulesPath 'device_transfer'

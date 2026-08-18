@@ -6,19 +6,28 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $requiredMajorVersion = 17
+$javaHome = $env:JAVA_HOME
 
-if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+if ([string]::IsNullOrWhiteSpace($javaHome)) {
     throw 'JAVA_HOME must point to JDK 17.'
 }
 
-$javaExecutable = Join-Path $env:JAVA_HOME 'bin\java.exe'
-if (-not (Test-Path -LiteralPath $javaExecutable -PathType Leaf)) {
-    throw 'JAVA_HOME does not contain bin\\java.exe.'
-}
+$requiredExecutables = @('java.exe', 'javac.exe')
+foreach ($executableName in $requiredExecutables) {
+    $executable = Join-Path $javaHome "bin\$executableName"
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "JAVA_HOME does not contain bin\$executableName."
+    }
 
-$javaVersion = (& $javaExecutable -version 2>&1 | Out-String).Trim()
-if ($javaVersion -notmatch ('version "' + $requiredMajorVersion + '(\.|\")')) {
-    throw "JAVA_HOME must resolve to JDK $requiredMajorVersion."
+    $version = (& $executable -version 2>&1 | Out-String).Trim()
+    $expectedPattern = if ($executableName -eq 'java.exe') {
+        'version "' + $requiredMajorVersion + '(\.|\")'
+    } else {
+        'javac ' + $requiredMajorVersion + '(\.|\")'
+    }
+    if ($version -notmatch $expectedPattern) {
+        throw "JAVA_HOME bin\$executableName must resolve to JDK $requiredMajorVersion."
+    }
 }
 
 $wrapper = Join-Path $PSScriptRoot '..\gradlew.bat'
