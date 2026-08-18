@@ -155,6 +155,7 @@ class AndroidKeystoreBearerStore(
                 val bytes =
                     try {
                         beforeRead()
+                        if (file.baseFile.length() > MAX_ENVELOPE_BYTES) return@withLock null
                         file.openRead().use { it.readBytes() }
                     } catch (cancelled: CancellationException) {
                         throw cancelled

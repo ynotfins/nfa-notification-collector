@@ -1,5 +1,6 @@
 package com.nfaalerts.collector
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.charset.StandardCharsets
@@ -19,6 +20,8 @@ class AppShellSmokeTest {
         val applicationSource = String(Files.readAllBytes(application), StandardCharsets.UTF_8)
         val activitySource = String(Files.readAllBytes(activity), StandardCharsets.UTF_8)
         assertTrue(applicationSource.contains("class NfaCollectorApp"))
+        assertTrue(applicationSource.contains("initializeOnIo()"))
+        assertFalse(applicationSource.contains("runBlocking("))
         assertTrue(activitySource.contains("NFA Notification Collector"))
         assertTrue(activitySource.contains("Readiness: setup required"))
     }

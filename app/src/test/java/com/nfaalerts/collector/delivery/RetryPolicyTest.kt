@@ -27,4 +27,11 @@ class RetryPolicyTest {
     fun jitterAboveRangeIsRejected() {
         RetryPolicy { 1.1 }.delayMillis(1)
     }
+
+    @Test
+    fun validatedBoundsRemainSafeAtTheLargestAttemptCount() {
+        val policy = RetryPolicy { 1.0 }
+
+        assertEquals(21_600_000L, policy.delayMillis(Int.MAX_VALUE, 30_000L, 21_600_000L))
+    }
 }

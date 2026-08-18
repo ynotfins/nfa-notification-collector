@@ -11,6 +11,7 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,6 +56,22 @@ class DeliveryWorkManagerInstrumentedTest {
         val driver = WorkManagerTestInitHelper.getTestDriver(context)!!
         driver.setInitialDelayMet(immediate.id)
         assertEquals(1, unfinished().size)
+    }
+
+    @Test
+    fun realWorkManagerKeepsRunningChainWhenWorkerAppendsFollowUp() {
+        val now = System.currentTimeMillis()
+        val scheduler = DeliveryWorkScheduler(context)
+        scheduler.ensureScheduled(now + TimeUnit.HOURS.toMillis(6))
+        val existing = unfinished().single()
+
+        scheduler.onWorkerStarted()
+        scheduler.ensureScheduled(now)
+        scheduler.onWorkerFinished(now)
+
+        val work = unfinished()
+        assertNotSame(WorkInfo.State.CANCELLED, work.first { it.id == existing.id }.state)
+        assertEquals(2, work.size)
     }
 
     private fun unfinished(): List<WorkInfo> =

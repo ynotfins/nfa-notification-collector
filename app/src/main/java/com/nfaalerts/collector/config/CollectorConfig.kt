@@ -245,8 +245,7 @@ class CollectorConfigCodec {
             }
             val baseElement = profile["baseUrl"]
             val baseUrl = (baseElement as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull.orEmpty()
-            val uri = runCatching { URI(baseUrl) }.getOrNull()
-            if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) {
+            if (!EndpointValidation.isHttpsOrigin(baseUrl)) {
                 errors +=
                     ConfigValidationError(
                         pointer(profilePath, "baseUrl"),
@@ -256,7 +255,7 @@ class CollectorConfigCodec {
             }
             val pathElement = profile["ingestPath"]
             val ingestPath = (pathElement as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull.orEmpty()
-            if (!ingestPath.startsWith("/") || ingestPath.startsWith("//")) {
+            if (!EndpointValidation.isRelativeIngestPath(ingestPath)) {
                 errors +=
                     ConfigValidationError(
                         pointer(profilePath, "ingestPath"),
@@ -278,10 +277,18 @@ class CollectorConfigCodec {
                     ConfigValidationError("/$section", "OBJECT_REQUIRED", "Configuration section must be an object.")
             }
         }
-        validatePositiveLong(root, "delivery", "connectTimeoutMs", errors)
-        validatePositiveLong(root, "delivery", "readTimeoutMs", errors)
-        validatePositiveLong(root, "delivery", "initialBackoffMs", errors)
-        validatePositiveLong(root, "delivery", "maxBackoffMs", errors)
+        val connectTimeout = validateLongRange(root, "delivery", "connectTimeoutMs", 5_000L..60_000L, errors)
+        val readTimeout = validateLongRange(root, "delivery", "readTimeoutMs", 5_000L..120_000L, errors)
+        val initialBackoff = validateLongRange(root, "delivery", "initialBackoffMs", 30_000L..MAX_BACKOFF_MS, errors)
+        val maximumBackoff = validateLongRange(root, "delivery", "maxBackoffMs", 30_000L..MAX_BACKOFF_MS, errors)
+        if (initialBackoff != null && maximumBackoff != null && maximumBackoff < initialBackoff) {
+            errors +=
+                ConfigValidationError(
+                    "/delivery/maxBackoffMs",
+                    "BACKOFF_MAX_BELOW_INITIAL",
+                    "Maximum backoff must not be less than the initial backoff.",
+                )
+        }
         validatePositiveInt(root, "retention", "sentDays", errors)
         validatePositiveInt(root, "retention", "maxSentRows", errors)
         validatePositiveInt(root, "diagnostics", "retentionDays", errors)
@@ -289,21 +296,23 @@ class CollectorConfigCodec {
         return errors.distinct()
     }
 
-    private fun validatePositiveLong(
+    private fun validateLongRange(
         root: JsonObject,
         section: String,
         key: String,
+        range: LongRange,
         errors: MutableList<ConfigValidationError>,
-    ) {
+    ): Long? {
         val value = ((root[section] as? JsonObject)?.get(key) as? JsonPrimitive)?.longOrNull
-        if (value == null || value <= 0L) {
+        if (value == null || value !in range) {
             errors +=
                 ConfigValidationError(
                     "/$section/$key",
-                    "POSITIVE_INTEGER_REQUIRED",
-                    "Value must be a positive integer.",
+                    "DELIVERY_RANGE",
+                    "Value is outside the supported delivery range.",
                 )
         }
+        return value
     }
 
     private fun validatePositiveInt(
@@ -354,7 +363,13 @@ class CollectorConfigCodec {
             }
 
             is JsonPrimitive -> {
-                if (element.isString && element.content.startsWith("Bearer ", ignoreCase = true)) {
+                if (
+                    element.isString &&
+                    (
+                        element.content.startsWith("Bearer ", ignoreCase = true) ||
+                            BEARER_TOKEN_SHAPE.matches(element.content)
+                    )
+                ) {
                     errors +=
                         ConfigValidationError(
                             path.ifEmpty { "/" },
@@ -572,7 +587,8 @@ class CollectorConfigCodec {
                 .filter(String::isNotEmpty)
                 .map(String::lowercase)
         val pairs = segments.zipWithNext().map { (first, second) -> first + second }
-        return segments.any { it in PROHIBITED_SEGMENTS } ||
+        return normalized in PROHIBITED_NORMALIZED_KEYS ||
+            segments.any { it in PROHIBITED_SEGMENTS } ||
             pairs.any { it in PROHIBITED_COMPOUNDS } ||
             normalized in PROHIBITED_FIELDS
     }
@@ -597,7 +613,9 @@ class CollectorConfigCodec {
         const val DEFAULT_INGEST_PATH = "/v1/ingest/alerts"
         const val MAX_PAYLOAD_BYTES = 1_048_576
         private const val LEGACY_PROFILE = "legacy"
+        private const val MAX_BACKOFF_MS = 21_600_000L
         private val DEVICE_ID = Regex("[A-Za-z0-9._:-]{1,128}")
+        private val BEARER_TOKEN_SHAPE = Regex("[A-Za-z0-9_-]{43}")
         private val PROHIBITED_FIELDS =
             setOf(
                 "deliveryrows",
@@ -616,5 +634,43 @@ class CollectorConfigCodec {
                 "token",
             )
         private val PROHIBITED_COMPOUNDS = setOf("accesstoken", "apikey", "clientsecret", "privatekey")
+        private val PROHIBITED_NORMALIZED_KEYS =
+            setOf(
+                "credentials",
+                "secrets",
+                "authheader",
+                "password",
+                "clientsecret",
+                "privatekey",
+                "accesstokenvalue",
+                "apikey",
+                "bearer",
+                "authorization",
+                "credential",
+                "ciphertext",
+            )
+    }
+}
+
+internal object EndpointValidation {
+    fun isHttpsOrigin(value: String): Boolean {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            !uri.host.isNullOrBlank() &&
+            uri.userInfo == null &&
+            (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null &&
+            (uri.port == -1 || uri.port in 1..65_535)
+    }
+
+    fun isRelativeIngestPath(value: String): Boolean {
+        if (!value.startsWith("/") || value.startsWith("//")) return false
+        val uri = runCatching { URI(value) }.getOrNull() ?: return false
+        return !uri.isAbsolute &&
+            uri.rawAuthority == null &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null &&
+            uri.rawPath == value
     }
 }

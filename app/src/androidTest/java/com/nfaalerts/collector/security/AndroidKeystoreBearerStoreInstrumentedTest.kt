@@ -150,4 +150,21 @@ class AndroidKeystoreBearerStoreInstrumentedTest {
                 store.clear()
             }
         }
+
+    @Test
+    fun oversizedRevisionEnvelopeFailsClosedBeforeFingerprinting() =
+        runBlocking {
+            val suffix = System.nanoTime().toString()
+            val alias = "nfa-oversized-$suffix"
+            val fileName = "bearer-oversized-$suffix.json"
+            val file = File(context.noBackupFilesDir, fileName)
+            val store = AndroidKeystoreBearerStore(context, alias, fileName)
+            try {
+                file.writeBytes(ByteArray(65_537) { 'x'.code.toByte() })
+
+                assertNull(store.revisionFingerprint())
+            } finally {
+                store.clear()
+            }
+        }
 }

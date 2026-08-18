@@ -28,20 +28,27 @@ class DeliveryWorkSchedulerTest {
     }
 
     @Test
-    fun cancelledActiveClaimCannotReplaceNewImmediateWorkWithLaterLeaseWake() {
-        val calls = mutableListOf<OneTimeWorkRequest>()
+    fun runningWorkerRecordsEarlierKickAndAppendsFollowUpWithoutReplacingItself() {
+        val calls = mutableListOf<Pair<ExistingWorkPolicy, OneTimeWorkRequest>>()
         val scheduler =
             DeliveryWorkScheduler(
-                enqueuer = UniqueWorkEnqueuer { _, _, request -> calls += request },
+                enqueuer = UniqueWorkEnqueuer { _, policy, request -> calls += policy to request },
                 clock = { 1_000L },
             )
 
-        scheduler.ensureScheduled(1_000L)
+        scheduler.ensureScheduled(21_601_000L)
         scheduler.onWorkerStarted()
         scheduler.ensureScheduled(1_000L)
         scheduler.ensureScheduled(601_000L)
+        scheduler.onWorkerFinished(601_000L)
 
         assertEquals(2, calls.size)
-        assertEquals(0L, calls.last().workSpec.initialDelay)
+        assertEquals(ExistingWorkPolicy.REPLACE, calls.first().first)
+        val followUp = calls.last()
+        assertEquals(ExistingWorkPolicy.APPEND_OR_REPLACE, followUp.first)
+        assertEquals(
+            0L,
+            followUp.second.workSpec.initialDelay,
+        )
     }
 }

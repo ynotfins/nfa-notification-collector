@@ -25,7 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -39,8 +38,7 @@ class NfaCollectorApp : Application() {
     override fun onCreate() {
         super.onCreate()
         appContainer = AppContainer(this)
-        appContainer.loadSelectionsBeforeCallbacks()
-        appContainer.startDeliveryRecovery()
+        appContainer.initializeOnIo()
     }
 }
 
@@ -98,12 +96,11 @@ class AppContainer(
                 ),
         )
 
-    fun loadSelectionsBeforeCallbacks() {
-        runBlocking(Dispatchers.IO) { sourceSelections.load() }
-    }
-
-    fun startDeliveryRecovery() {
-        scope.launch { recoverDeliveryOnStartup() }
+    fun initializeOnIo() {
+        scope.launch(Dispatchers.IO) {
+            sourceSelections.load()
+            recoverDeliveryOnStartup()
+        }
     }
 
     suspend fun recoverDeliveryOnStartup() {

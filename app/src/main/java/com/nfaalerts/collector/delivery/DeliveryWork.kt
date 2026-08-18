@@ -10,6 +10,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.nfaalerts.collector.NfaCollectorApp
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 fun interface UniqueWorkEnqueuer {
@@ -21,10 +23,9 @@ fun interface UniqueWorkEnqueuer {
 }
 
 /**
- * Maintains one replaceable unique drain. REPLACE preempts an obsolete delayed request when earlier
- * database work appears. The in-process earliest-due guard prevents a cancelled active worker's
- * later lease wake from replacing that earlier request; Room lease recovery is the durable fallback
- * after process death.
+ * Maintains one unique drain. External callers may replace an obsolete delayed request with earlier
+ * work. While a worker is active, requested due times are recorded and appended after the drain so
+ * a worker cannot cancel itself.
  */
 class DeliveryWorkScheduler(
     private val enqueuer: UniqueWorkEnqueuer,
@@ -32,6 +33,8 @@ class DeliveryWorkScheduler(
 ) : DeliveryScheduler {
     private val scheduleLock = Any()
     private var scheduledDueAtEpochMillis: Long = Long.MAX_VALUE
+    private var runningWorkers = 0
+    private var pendingWorkerDueAtEpochMillis: Long = Long.MAX_VALUE
 
     constructor(context: Context) : this(
         enqueuer =
@@ -42,6 +45,10 @@ class DeliveryWorkScheduler(
 
     override fun ensureScheduled(dueAtEpochMillis: Long) {
         synchronized(scheduleLock) {
+            if (runningWorkers > 0) {
+                pendingWorkerDueAtEpochMillis = minOf(pendingWorkerDueAtEpochMillis, dueAtEpochMillis)
+                return
+            }
             if (dueAtEpochMillis >= scheduledDueAtEpochMillis) return
             enqueuer.enqueue(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request(dueAtEpochMillis))
             scheduledDueAtEpochMillis = dueAtEpochMillis
@@ -50,7 +57,24 @@ class DeliveryWorkScheduler(
 
     fun onWorkerStarted() {
         synchronized(scheduleLock) {
+            runningWorkers++
             scheduledDueAtEpochMillis = Long.MAX_VALUE
+        }
+    }
+
+    fun onWorkerFinished(nextDueAtEpochMillis: Long?) {
+        synchronized(scheduleLock) {
+            if (runningWorkers == 0) return
+            runningWorkers--
+            if (runningWorkers > 0) {
+                nextDueAtEpochMillis?.let { pendingWorkerDueAtEpochMillis = minOf(pendingWorkerDueAtEpochMillis, it) }
+                return
+            }
+            val dueAt = minOf(pendingWorkerDueAtEpochMillis, nextDueAtEpochMillis ?: Long.MAX_VALUE)
+            pendingWorkerDueAtEpochMillis = Long.MAX_VALUE
+            if (dueAt == Long.MAX_VALUE) return
+            enqueuer.enqueue(UNIQUE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request(dueAt))
+            scheduledDueAtEpochMillis = dueAt
         }
     }
 
@@ -73,10 +97,16 @@ class DeliveryDrainWorker(
         val app = applicationContext as? NfaCollectorApp ?: return Result.failure()
         val container = app.appContainer
         container.deliveryScheduler.onWorkerStarted()
-        container.recoverExpiredSending()
-        container.deliveryCoordinator.drainAvailable("worker-$id")
-        container.runDeliveryMaintenance()
-        container.nextDeliveryDueAt()?.let(container.deliveryScheduler::ensureScheduled)
-        return Result.success()
+        return try {
+            container.recoverExpiredSending()
+            container.deliveryCoordinator.drainAvailable("worker-$id")
+            container.runDeliveryMaintenance()
+            Result.success()
+        } finally {
+            withContext(NonCancellable) {
+                val nextDueAt = runCatching { container.nextDeliveryDueAt() }.getOrNull()
+                container.deliveryScheduler.onWorkerFinished(nextDueAt)
+            }
+        }
     }
 }

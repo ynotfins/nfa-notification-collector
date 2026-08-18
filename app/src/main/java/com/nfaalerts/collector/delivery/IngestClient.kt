@@ -1,6 +1,7 @@
 package com.nfaalerts.collector.delivery
 
 import com.nfaalerts.collector.config.EndpointProfile
+import com.nfaalerts.collector.config.EndpointValidation
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -145,19 +146,15 @@ class OkHttpIngestClient(
         operationalClient: OkHttpClient,
     ): IngestResult {
         require(payload.source == "bnn") { "Only BNN may enter the ingest client." }
-        val base = endpoint.baseUrl.toHttpUrl()
-        require(base.isHttps) { "Operational endpoint must use HTTPS." }
-        require(endpoint.ingestPath.startsWith("/") && !endpoint.ingestPath.startsWith("//")) {
-            "Ingest path is invalid."
-        }
         val authorizationChars = CharArray(BEARER_PREFIX.length + bearer.size)
         BEARER_PREFIX.toCharArray().copyInto(authorizationChars)
         bearer.copyInto(authorizationChars, BEARER_PREFIX.length)
         val request =
             try {
+                val destination = endpointUrl(endpoint)
                 Request
                     .Builder()
-                    .url(base.newBuilder().encodedPath(endpoint.ingestPath).build())
+                    .url(destination)
                     .header("Authorization", String(authorizationChars))
                     .header("X-NFA-Schema-Version", "1")
                     .post(payload.bodyBytes.toRequestBody(JSON_MEDIA_TYPE))
@@ -187,6 +184,22 @@ class OkHttpIngestClient(
             classifier.networkFailure(failure)
         }
     }
+
+    private fun endpointUrl(endpoint: EndpointProfile) =
+        requireNotNull(
+            endpoint.baseUrl.takeIf(EndpointValidation::isHttpsOrigin)?.toHttpUrl(),
+        ) { "Operational endpoint must be an HTTPS origin." }.let { base ->
+            require(EndpointValidation.isRelativeIngestPath(endpoint.ingestPath)) { "Ingest path is invalid." }
+            base.newBuilder().encodedPath(endpoint.ingestPath).build().also { destination ->
+                require(
+                    destination.scheme == base.scheme &&
+                        destination.host == base.host &&
+                        destination.port == base.port &&
+                        destination.query == null &&
+                        destination.encodedPath == endpoint.ingestPath,
+                ) { "Endpoint differs from configured origin and path." }
+            }
+        }
 
     companion object {
         private const val BEARER_PREFIX = "Bearer "

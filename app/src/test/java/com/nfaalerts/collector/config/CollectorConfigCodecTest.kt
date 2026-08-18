@@ -152,6 +152,130 @@ class CollectorConfigCodecTest {
     }
 
     @Test
+    fun unknownNestedSecretContainersAndBearerShapedValuesAreRejectedWithoutExport() {
+        val bearerShape = "A".repeat(43)
+        val prohibitedKeys =
+            listOf(
+                "credentials",
+                "secrets",
+                "authHeader",
+                "password",
+                "clientSecret",
+                "privateKey",
+                "accessTokenValue",
+                "apiKey",
+                "bearer",
+                "authorization",
+                "credential",
+                "ciphertext",
+            )
+
+        prohibitedKeys.forEach { key ->
+            val result =
+                codec.decode(
+                    """{"configVersion":1,"sources":[],"future":{"$key":"safe"}}""".encodeToByteArray(),
+                ) as ConfigDecodeResult.Invalid
+            assertTrue("key=$key", result.errors.any { it.code == "PROHIBITED_CONFIG_FIELD" })
+        }
+
+        val result =
+            codec.decode(
+                """{"configVersion":1,"sources":[],"future":{"nested":["$bearerShape"]}}""".encodeToByteArray(),
+            ) as ConfigDecodeResult.Invalid
+
+        assertTrue(result.errors.any { it.path == "/future/nested/0" && it.code == "PROHIBITED_CONFIG_VALUE" })
+        assertFalse(
+            codec.isExportable(
+                """{"configVersion":1,"sources":[],"future":"$bearerShape"}""".encodeToByteArray(),
+            ),
+        )
+    }
+
+    @Test
+    fun deliveryTimeoutAndBackoffBoundsAreValidatedAsOneConfiguration() {
+        val invalid =
+            """
+            {
+              "configVersion":1,
+              "sources":[],
+              "delivery": {
+                "connectTimeoutMs":4999,
+                "readTimeoutMs":120001,
+                "initialBackoffMs":29999,
+                "maxBackoffMs":29998
+              }
+            }
+            """.trimIndent().encodeToByteArray()
+        val invalidResult = codec.decode(invalid) as ConfigDecodeResult.Invalid
+
+        listOf(
+            "/delivery/connectTimeoutMs",
+            "/delivery/readTimeoutMs",
+            "/delivery/initialBackoffMs",
+            "/delivery/maxBackoffMs",
+        ).forEach { path ->
+            assertTrue("missing $path", invalidResult.errors.any { it.path == path })
+        }
+
+        val boundary =
+            """
+            {
+              "configVersion":1,
+              "sources":[],
+              "delivery": {
+                "connectTimeoutMs":5000,
+                "readTimeoutMs":120000,
+                "initialBackoffMs":30000,
+                "maxBackoffMs":21600000
+              }
+            }
+            """.trimIndent().encodeToByteArray()
+
+        assertTrue(codec.decode(boundary) is ConfigDecodeResult.Valid)
+    }
+
+    @Test
+    fun endpointsAreRestrictedToHttpsOriginAndRelativeIngestPath() {
+        listOf(
+            "https://user:password@example.invalid",
+            "https://example.invalid/not-an-origin",
+            "https://example.invalid?query=value",
+            "https://example.invalid#fragment",
+            "https://example.invalid:0",
+        ).forEach { baseUrl ->
+            val result =
+                codec.decode(
+                    """
+                    {"configVersion":1,"sources":[],"endpointProfiles":
+                    {"tailscale":{"baseUrl":"$baseUrl","ingestPath":"/v1/ingest/alerts"}}}
+                    """.trimIndent().encodeToByteArray(),
+                ) as ConfigDecodeResult.Invalid
+            assertTrue(
+                "baseUrl=$baseUrl",
+                result.errors.any { it.path == "/endpointProfiles/tailscale/baseUrl" },
+            )
+        }
+        listOf(
+            "//other.invalid/ingest",
+            "/ingest?query=value",
+            "/ingest#fragment",
+            "https://other.invalid/ingest",
+        ).forEach { path ->
+            val result =
+                codec.decode(
+                    """
+                    {"configVersion":1,"sources":[],"endpointProfiles":
+                    {"tailscale":{"baseUrl":"https://example.invalid","ingestPath":"$path"}}}
+                    """.trimIndent().encodeToByteArray(),
+                ) as ConfigDecodeResult.Invalid
+            assertTrue(
+                "path=$path",
+                result.errors.any { it.path == "/endpointProfiles/tailscale/ingestPath" },
+            )
+        }
+    }
+
+    @Test
     fun nonsecretWordsThatOnlyContainSensitiveSubstringsRemainPreserved() {
         val payload =
             """{"configVersion":1,"sources":[],"secretaryLabel":"dispatch","tokenizationMode":"none","privateMode":false}"""

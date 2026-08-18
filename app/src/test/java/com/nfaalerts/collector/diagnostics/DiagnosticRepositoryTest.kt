@@ -41,10 +41,10 @@ class DiagnosticRepositoryTest {
                 repository.record(
                     "DELIVERY_RETRY",
                     mapOf(
-                        "eventId" to "event",
+                        "eventId" to "event-1",
                         "state" to "RETRY_WAIT",
                         "attempt" to 4,
-                        "errorCode" to "x".repeat(10_000),
+                        "errorCode" to "NETWORK_TIMEOUT",
                     ),
                 )
 
@@ -66,6 +66,28 @@ class DiagnosticRepositoryTest {
             val result = repository.record("DELIVERY_RETRY", mapOf("state" to listOf("private")))
 
             assertEquals(DiagnosticRecordResult.Rejected("SCALAR_VALUE_REQUIRED"), result)
+            assertTrue(store.rows.isEmpty())
+        }
+
+    @Test
+    fun bearerShapedValuesAndArbitraryDiagnosticFormatsAreRejectedBeforePersistence() =
+        runBlocking {
+            val store = RecordingDiagnosticStore()
+            val repository = DiagnosticRepository(store, clock = { 1L }, idFactory = { "id" })
+            val bearerShape = "A".repeat(43)
+
+            listOf(
+                mapOf("errorCode" to bearerShape),
+                mapOf("eventId" to bearerShape),
+                mapOf("state" to bearerShape),
+                mapOf("errorCode" to "arbitrary private payload"),
+                mapOf("eventId" to "contains spaces"),
+            ).forEach { values ->
+                assertEquals(
+                    DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE"),
+                    repository.record("DELIVERY_RETRY", values),
+                )
+            }
             assertTrue(store.rows.isEmpty())
         }
 

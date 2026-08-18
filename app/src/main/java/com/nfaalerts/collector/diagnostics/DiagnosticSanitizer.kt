@@ -59,11 +59,14 @@ class DiagnosticRepository(
         if (values.keys.any { it !in ALLOWED_FIELDS }) {
             return DiagnosticRecordResult.Rejected("DIAGNOSTIC_KEY_NOT_ALLOWED")
         }
-        if (values.values.filterIsInstance<String>().any { it.startsWith("Bearer ", ignoreCase = true) }) {
+        if (values.values.filterIsInstance<String>().any(::isSensitiveValue)) {
             return DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE")
         }
         if (values.values.any { it != null && it !is String && it !is Number && it !is Boolean }) {
             return DiagnosticRecordResult.Rejected("SCALAR_VALUE_REQUIRED")
+        }
+        if (values.any { (key, value) -> !hasSafeFieldFormat(key, value) }) {
+            return DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE")
         }
         val details = safeObject(values) ?: return DiagnosticRecordResult.Rejected("DIAGNOSTIC_ROW_LIMIT")
         val now = clock()
@@ -101,10 +104,32 @@ class DiagnosticRepository(
         return SENSITIVE_FRAGMENTS.any(normalized::contains)
     }
 
+    private fun isSensitiveValue(value: String): Boolean =
+        value.startsWith("Bearer ", ignoreCase = true) || BEARER_TOKEN_SHAPE.matches(value)
+
+    private fun hasSafeFieldFormat(
+        key: String,
+        value: Any?,
+    ): Boolean =
+        when (key) {
+            "eventId" -> value is String && SAFE_IDENTIFIER.matches(value)
+            "ingestId" -> value is String && runCatching { UUID.fromString(value) }.isSuccess
+            "errorCode", "state", "listener" -> value is String && SAFE_UPPER_TOKEN.matches(value)
+            "packageName" -> value is String && PACKAGE_NAME.matches(value)
+            "source" -> value is String && SAFE_LOWER_TOKEN.matches(value)
+            "attempt", "createdAt", "httpStatus", "nextAttemptAt", "queue" -> value is Number
+            else -> false
+        }
+
     companion object {
         private const val MAX_BYTES = 4_096
         private const val MAX_VALUE_CHARS = 512
         private val EVENT_CODE = Regex("[A-Z][A-Z0-9_]{0,63}")
+        private val SAFE_UPPER_TOKEN = Regex("[A-Z][A-Z0-9_]{0,63}")
+        private val SAFE_LOWER_TOKEN = Regex("[a-z][a-z0-9_-]{0,63}")
+        private val SAFE_IDENTIFIER = Regex("[A-Za-z0-9._:-]{1,128}")
+        private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+")
+        private val BEARER_TOKEN_SHAPE = Regex("[A-Za-z0-9_-]{43}")
         private val ALLOWED_EVENT_CODES =
             setOf(
                 "CAPTURE_PERSISTED",

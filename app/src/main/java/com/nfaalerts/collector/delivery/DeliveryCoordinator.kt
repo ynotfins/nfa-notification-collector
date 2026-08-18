@@ -111,15 +111,27 @@ class DeliveryCoordinator(
     private val retryPolicy: RetryPolicy = RetryPolicy(),
 ) {
     suspend fun drainOne(owner: String): Boolean {
-        val claimStartedAt = clock()
-        val claim =
-            store.claimDue(owner, claimStartedAt, claimStartedAt + LEASE_DURATION_MS)
-                ?: return false
+        var claim: DeliveryOutboxEntity? = null
+        var claimStartedAt = clock()
         var retryBounds = RetryBounds(DEFAULT_INITIAL_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS)
         try {
-            val capture = store.capture(claim.eventId)
+            claimStartedAt = clock()
+            val activeClaim =
+                store.claimDue(
+                    owner,
+                    claimStartedAt,
+                    saturatingAdd(claimStartedAt, LEASE_DURATION_MS),
+                ) ?: return false
+            claim = activeClaim
+            val capture = store.capture(activeClaim.eventId)
             if (capture == null) {
-                store.markQuarantined(claim.eventId, owner, completionTime(claimStartedAt), "CAPTURE_MISSING", null)
+                store.markQuarantined(
+                    activeClaim.eventId,
+                    owner,
+                    completionTime(claimStartedAt),
+                    "CAPTURE_MISSING",
+                    null,
+                )
                 return true
             }
             val runtime = settings.load()
@@ -146,14 +158,14 @@ class DeliveryCoordinator(
                 }
 
                 is WireProjectionResult.Ready -> {
-                    deliver(owner, claimStartedAt, claim, runtime, retryBounds, projection)
+                    deliver(owner, claimStartedAt, activeClaim, runtime, retryBounds, projection)
                 }
             }
         } catch (cancelled: CancellationException) {
-            containCancellation(owner, claim, claimStartedAt)
+            claim?.let { containCancellation(owner, it, claimStartedAt) }
             throw cancelled
         } catch (_: Exception) {
-            containFailure(owner, claimStartedAt, claim, retryBounds)
+            claim?.let { containFailure(owner, claimStartedAt, it, retryBounds) }
         } finally {
             scheduleNextSafely()
         }
@@ -262,12 +274,14 @@ class DeliveryCoordinator(
     ) {
         val completedAt = completionTime(claimStartedAt)
         val next =
-            completedAt +
+            saturatingAdd(
+                completedAt,
                 retryPolicy.delayMillis(
                     attemptCount = claim.attemptCount.coerceAtLeast(1),
                     initialDelayMs = retryBounds.initialMs,
                     maximumDelayMs = retryBounds.maximumMs,
-                )
+                ),
+            )
         store.markRetryWait(claim.eventId, owner, completedAt, next, result)
         scheduler.ensureScheduled(next)
     }
@@ -300,7 +314,7 @@ class DeliveryCoordinator(
         claim: DeliveryOutboxEntity,
         claimStartedAt: Long,
     ) {
-        val leaseExpiry = claim.leaseExpiresAtEpochMillis ?: (claimStartedAt + LEASE_DURATION_MS)
+        val leaseExpiry = claim.leaseExpiresAtEpochMillis ?: saturatingAdd(claimStartedAt, LEASE_DURATION_MS)
         runCatching { scheduler.ensureScheduled(leaseExpiry) }
     }
 
@@ -312,7 +326,10 @@ class DeliveryCoordinator(
         withContext(NonCancellable) {
             val completedAt = completionTime(claimStartedAt)
             val leaseExpiry =
-                (claim.leaseExpiresAtEpochMillis ?: (claimStartedAt + LEASE_DURATION_MS)).coerceAtLeast(completedAt)
+                (
+                    claim.leaseExpiresAtEpochMillis
+                        ?: saturatingAdd(claimStartedAt, LEASE_DURATION_MS)
+                ).coerceAtLeast(completedAt)
             try {
                 store.markRetryWait(
                     claim.eventId,
@@ -333,6 +350,11 @@ class DeliveryCoordinator(
             .getOrNull()
             ?.let { runCatching { scheduler.ensureScheduled(it) } }
     }
+
+    private fun saturatingAdd(
+        left: Long,
+        right: Long,
+    ): Long = if (right > 0L && left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
     private data class RetryBounds(
         val initialMs: Long,

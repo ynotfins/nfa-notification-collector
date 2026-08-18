@@ -149,6 +149,49 @@ class IngestClientTest {
     }
 
     @Test
+    fun endpointWithCredentialsPathQueryOrFragmentIsRejectedBeforeNetwork() {
+        val payload =
+            WireProjectionResult.Ready(
+                source = "bnn",
+                bodyBytes = "{}".encodeToByteArray(),
+                metadata = kotlinx.serialization.json.JsonObject(emptyMap()),
+            )
+
+        listOf(
+            EndpointProfile("https://user:password@example.invalid", "/v1/ingest/alerts"),
+            EndpointProfile("https://example.invalid/other", "/v1/ingest/alerts"),
+            EndpointProfile("https://example.invalid?query=value", "/v1/ingest/alerts"),
+            EndpointProfile("https://example.invalid", "/v1/ingest?query=value"),
+            EndpointProfile("https://example.invalid", "/v1/ingest#fragment"),
+        ).forEach { endpoint ->
+            assertTrue(
+                runCatching { OkHttpIngestClient(client).send(endpoint, CharArray(1) { 'x' }, payload) }.isFailure,
+            )
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun encodedConfiguredPathIsTheExactPathSentToTheConfiguredOrigin() {
+        server.enqueue(MockResponse().setResponseCode(202).setBody("{}"))
+        server.start()
+        val payload =
+            WireProjectionResult.Ready(
+                source = "bnn",
+                bodyBytes = "{}".encodeToByteArray(),
+                metadata = kotlinx.serialization.json.JsonObject(emptyMap()),
+            )
+
+        OkHttpIngestClient(client).send(
+            EndpointProfile(server.url("/").toString().removeSuffix("/"), "/v1%2Fingest/alerts"),
+            CharArray(43) { 'x' },
+            payload,
+        )
+
+        assertEquals("/v1%2Fingest/alerts", server.takeRequest(5, TimeUnit.SECONDS)!!.path)
+    }
+
+    @Test
     fun nonBnnRequestIsRejectedBeforeNetwork() {
         val payload =
             WireProjectionResult.Ready(

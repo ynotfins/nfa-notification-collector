@@ -1,6 +1,5 @@
 package com.nfaalerts.collector.delivery
 
-import kotlin.math.pow
 import kotlin.random.Random
 
 class RetryPolicy(
@@ -21,7 +20,13 @@ class RetryPolicy(
         val sample = jitter()
         require(sample in 0.0..1.0) { "Jitter must be in [0,1]." }
         val exponent = (attemptCount - 1).coerceAtMost(30)
-        val raw = (initialDelayMs.toDouble() * 2.0.pow(exponent)).toLong().coerceAtMost(maximumDelayMs)
+        val multiplier = 1L shl exponent
+        val raw =
+            if (initialDelayMs > maximumDelayMs / multiplier) {
+                maximumDelayMs
+            } else {
+                initialDelayMs * multiplier
+            }
         val half = raw / 2L
         return (half + (half * sample).toLong()).coerceAtMost(maximumDelayMs)
     }
