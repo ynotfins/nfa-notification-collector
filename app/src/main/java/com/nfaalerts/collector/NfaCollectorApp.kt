@@ -2,6 +2,7 @@ package com.nfaalerts.collector
 
 import android.app.Application
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
+import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
 import com.nfaalerts.collector.config.InstalledAppRepository
@@ -32,11 +33,12 @@ class AppContainer(
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
+    val listenerStatus = ListenerStatusRepository()
     private val database: NfaCollectorDatabase by lazy {
         NfaCollectorDatabase.create(application.applicationContext)
     }
     private val captureProcessor: NotificationCaptureProcessor by lazy {
-        NotificationCaptureProcessor(
+        NotificationCaptureProcessor.createAndroid(
             packageManager = application.packageManager,
             captureWriteDao = { database.captureWriteDao() },
         )
@@ -47,7 +49,12 @@ class AppContainer(
             allowlistProvider = sourceSelections::snapshot,
             eventIdFactory = { UUID.randomUUID().toString() },
             clock = System::currentTimeMillis,
-            dispatcher = CoroutineCaptureDispatcher(scope, captureProcessor::process),
+            dispatcher =
+                CoroutineCaptureDispatcher(
+                    scope = scope,
+                    processor = captureProcessor::process,
+                    diagnostics = listenerStatus,
+                ),
         )
 
     fun loadSelectionsBeforeCallbacks() {

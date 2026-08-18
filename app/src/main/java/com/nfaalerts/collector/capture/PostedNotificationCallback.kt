@@ -13,6 +13,8 @@ data class LightweightPostedNotification(
     val userId: Int,
     val isOngoing: Boolean,
     val isClearable: Boolean,
+    val groupKey: String? = null,
+    val overrideGroupKey: String? = null,
     val notificationHandle: Any,
 )
 
@@ -26,6 +28,8 @@ data class NotificationIdentity(
     val userId: Int,
     val isOngoing: Boolean,
     val isClearable: Boolean,
+    val groupKey: String? = null,
+    val overrideGroupKey: String? = null,
 )
 
 data class DispatchedNotification(
@@ -63,6 +67,8 @@ class PostedNotificationCallback(
                         userId = input.userId,
                         isOngoing = input.isOngoing,
                         isClearable = input.isClearable,
+                        groupKey = input.groupKey,
+                        overrideGroupKey = input.overrideGroupKey,
                     ),
                 source = source,
                 notificationHandle = input.notificationHandle,

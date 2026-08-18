@@ -81,6 +81,42 @@ class SourceSelectionRepositoryTest {
         }
 
     @Test
+    fun `selection state flow publishes only explicitly confirmed BNN mapping`() =
+        runBlocking {
+            val repository = SourceSelectionRepository(RecordingSelectionStore())
+            val unconfirmed = selection("com.example.bnn").copy(sourceId = "bnn")
+
+            assertEquals(SelectionUpdate.BnnConfirmationRequired, repository.upsert(unconfirmed))
+            assertTrue(
+                repository.selections.value.selections
+                    .isEmpty(),
+            )
+            assertEquals(
+                SelectionUpdate.Accepted,
+                repository.upsert(unconfirmed.copy(bnnMappingConfirmed = true)),
+            )
+            assertEquals(
+                "com.example.bnn",
+                repository.selections.value.selections
+                    .single()
+                    .packageName,
+            )
+        }
+
+    @Test
+    fun `invalid persisted source count fails closed with empty allowlist`() =
+        runBlocking {
+            val store = RecordingSelectionStore()
+            store.lastSaved = (0..MAX_SELECTED_SOURCES).map { selection("com.example.invalid$it") }
+            val repository = SourceSelectionRepository(store)
+
+            repository.load()
+
+            assertTrue(repository.snapshot().selections.isEmpty())
+            assertEquals(SelectionLoadState.Invalid("TOO_MANY_SOURCES"), repository.loadState.value)
+        }
+
+    @Test
     fun `system classification includes updated system applications`() {
         assertTrue(InstalledAppClassifier.isSystem(ApplicationInfo.FLAG_SYSTEM))
         assertTrue(InstalledAppClassifier.isSystem(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))

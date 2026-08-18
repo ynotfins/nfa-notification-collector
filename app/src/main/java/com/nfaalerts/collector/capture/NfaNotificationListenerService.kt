@@ -8,6 +8,16 @@ import android.service.notification.StatusBarNotification
 import com.nfaalerts.collector.NfaCollectorApp
 
 class NfaNotificationListenerService : NotificationListenerService() {
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        appContainer().listenerStatus.onListenerConnected()
+    }
+
+    override fun onListenerDisconnected() {
+        appContainer().listenerStatus.onListenerDisconnected()
+        super.onListenerDisconnected()
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val input =
             LightweightPostedNotification(
@@ -25,10 +35,14 @@ class NfaNotificationListenerService : NotificationListenerService() {
                 userId = sbn.userId,
                 isOngoing = sbn.isOngoing,
                 isClearable = sbn.isClearable,
+                groupKey = sbn.groupKey,
+                overrideGroupKey = sbn.overrideGroupKey,
                 notificationHandle = sbn.notification,
             )
-        (application as NfaCollectorApp).appContainer.postedNotificationCallback.onNotificationPosted(input)
+        appContainer().postedNotificationCallback.onNotificationPosted(input)
     }
+
+    private fun appContainer() = (application as NfaCollectorApp).appContainer
 
     private companion object {
         const val UID_UNAVAILABLE = -1

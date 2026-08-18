@@ -92,7 +92,12 @@ class SafeCanonicalSerializerTest {
                             remoteInputs = listOf(SafeRemoteInputValue("reply", "Reply", true, setOf("text/plain"))),
                             hasPendingIntent = true,
                         ),
-                    "message" to SafeMessageValue("Exact message", 99L, "Sender"),
+                    "message" to
+                        SafeMessageValue(
+                            "Exact message",
+                            99L,
+                            SafePersonValue("Sender", null, null, false, false, null),
+                        ),
                 ),
                 identity,
             ) as CanonicalSerialization.Success
@@ -104,15 +109,58 @@ class SafeCanonicalSerializerTest {
     }
 
     @Test
-    fun `unknown values survive broken safe representations`() {
+    fun `unknown values never execute arbitrary representation`() {
+        val unknown = CountingToString()
         val result =
             SafeCanonicalSerializer().serialize(
-                mapOf("unknown" to BrokenToString()),
+                mapOf("unknown" to unknown),
                 identity,
             ) as CanonicalSerialization.Success
 
-        assertTrue(result.json.contains(BrokenToString::class.java.name))
-        assertTrue(result.json.contains("representation_failure"))
+        assertEquals(0, unknown.calls)
+        assertTrue(result.json.contains(CountingToString::class.java.name))
+        assertTrue(result.json.contains("unsupported_value"))
+    }
+
+    @Test
+    fun `unordered sets sort by canonical serialized bytes while lists retain order`() {
+        val serializer = SafeCanonicalSerializer()
+        val first = serializer.serialize(mapOf("set" to linkedSetOf("z", "a")), identity)
+        val second = serializer.serialize(mapOf("set" to linkedSetOf("a", "z")), identity)
+        val list = serializer.serialize(mapOf("list" to listOf("z", "a")), identity) as CanonicalSerialization.Success
+
+        assertEquals(first, second)
+        assertTrue(list.json.indexOf("\"value\":\"z\"") < list.json.indexOf("\"value\":\"a\""))
+    }
+
+    @Test
+    fun `colliding canonical map keys preserve every entry with collision markers`() {
+        val result =
+            SafeCanonicalSerializer().serialize(
+                linkedMapOf<Any, Any>(1 to "integer", "1" to "string"),
+                identity,
+            ) as CanonicalSerialization.Success
+
+        assertTrue(result.json.contains("key_collision"))
+        assertTrue(result.json.contains("integer"))
+        assertTrue(result.json.contains("string"))
+    }
+
+    @Test
+    fun `map key enumeration failure becomes a bounded root marker`() {
+        val result = SafeCanonicalSerializer().serialize(BrokenKeysMap(), identity)
+
+        assertTrue(result is CanonicalSerialization.Success)
+        result as CanonicalSerialization.Success
+        assertTrue(result.json.contains("key_enumeration_failure"))
+    }
+
+    @Test
+    fun `repeat serialization is byte deterministic for unsupported values`() {
+        val value = mapOf("unknown" to CountingToString(), "set" to hashSetOf("b", "a"))
+        val serializer = SafeCanonicalSerializer()
+
+        assertEquals(serializer.serialize(value, identity), serializer.serialize(value, identity))
     }
 
     @Test
@@ -144,8 +192,31 @@ class SafeCanonicalSerializerTest {
         }
     }
 
-    private class BrokenToString {
-        override fun toString(): String = error("boom")
+    private class CountingToString {
+        var calls = 0
+
+        override fun toString(): String {
+            calls += 1
+            return "must-not-run"
+        }
+    }
+
+    private class BrokenKeysMap : Map<Any, Any?> {
+        override val entries: Set<Map.Entry<Any, Any?>>
+            get() = error("entries")
+        override val keys: Set<Any>
+            get() = error("keys")
+        override val size: Int = 1
+        override val values: Collection<Any?>
+            get() = error("values")
+
+        override fun containsKey(key: Any): Boolean = false
+
+        override fun containsValue(value: Any?): Boolean = false
+
+        override fun get(key: Any): Any? = null
+
+        override fun isEmpty(): Boolean = false
     }
 
     private class PerKeyFailureMap : Map<String, Any?> {

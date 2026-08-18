@@ -1,5 +1,8 @@
 package com.nfaalerts.collector.config
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
@@ -20,17 +23,46 @@ sealed interface SelectionUpdate {
     ) : SelectionUpdate
 }
 
+sealed interface SelectionLoadState {
+    data object NotLoaded : SelectionLoadState
+
+    data object Loaded : SelectionLoadState
+
+    data class Invalid(
+        val code: String,
+    ) : SelectionLoadState
+}
+
+class InvalidSelectionConfigException(
+    val code: String,
+) : IllegalArgumentException(code)
+
 class SourceSelectionRepository(
     private val store: SourceSelectionStore,
 ) {
     private val mutationMutex = Mutex()
     private val current = AtomicReference(AllowlistSnapshot.EMPTY)
+    private val mutableSelections = MutableStateFlow(AllowlistSnapshot.EMPTY)
+    private val mutableLoadState = MutableStateFlow<SelectionLoadState>(SelectionLoadState.NotLoaded)
+    val selections: StateFlow<AllowlistSnapshot> = mutableSelections.asStateFlow()
+    val loadState: StateFlow<SelectionLoadState> = mutableLoadState.asStateFlow()
 
     fun snapshot(): AllowlistSnapshot = current.get()
 
     suspend fun load() =
         mutationMutex.withLock {
-            current.set(AllowlistSnapshot.from(store.load().take(MAX_SELECTED_SOURCES)))
+            try {
+                val loaded = store.load()
+                validateStoredSelections(loaded)
+                publish(AllowlistSnapshot.from(loaded))
+                mutableLoadState.value = SelectionLoadState.Loaded
+            } catch (failure: InvalidSelectionConfigException) {
+                publish(AllowlistSnapshot.EMPTY)
+                mutableLoadState.value = SelectionLoadState.Invalid(failure.code)
+            } catch (_: Exception) {
+                publish(AllowlistSnapshot.EMPTY)
+                mutableLoadState.value = SelectionLoadState.Invalid("INVALID_CONFIG")
+            }
         }
 
     suspend fun upsert(selection: SourceSelection): SelectionUpdate =
@@ -50,7 +82,8 @@ class SourceSelectionRepository(
             existing[selection.packageName] = selection.copy(rawTextOrder = selection.rawTextOrder.toList())
             val updated = existing.values.sortedBy(SourceSelection::packageName)
             store.save(updated)
-            current.set(AllowlistSnapshot.from(updated))
+            publish(AllowlistSnapshot.from(updated))
+            mutableLoadState.value = SelectionLoadState.Loaded
             SelectionUpdate.Accepted
         }
 
@@ -58,8 +91,29 @@ class SourceSelectionRepository(
         mutationMutex.withLock {
             val updated = current.get().selections.filterNot { it.packageName == packageName }
             store.save(updated)
-            current.set(AllowlistSnapshot.from(updated))
+            publish(AllowlistSnapshot.from(updated))
+            mutableLoadState.value = SelectionLoadState.Loaded
         }
+
+    private fun publish(snapshot: AllowlistSnapshot) {
+        current.set(snapshot)
+        mutableSelections.value = snapshot
+    }
+
+    private fun validateStoredSelections(selections: List<SourceSelection>) {
+        if (selections.size > MAX_SELECTED_SOURCES) {
+            throw InvalidSelectionConfigException("TOO_MANY_SOURCES")
+        }
+        if (selections.map(SourceSelection::packageName).toSet().size != selections.size) {
+            throw InvalidSelectionConfigException("DUPLICATE_SOURCE_PACKAGE")
+        }
+        if (selections.any { it.packageName.isBlank() || it.sourceId.isBlank() || it.rawTextOrder.isEmpty() }) {
+            throw InvalidSelectionConfigException("INVALID_SOURCE")
+        }
+        if (selections.any { it.sourceId == BNN_SOURCE_ID && !it.bnnMappingConfirmed }) {
+            throw InvalidSelectionConfigException("BNN_CONFIRMATION_REQUIRED")
+        }
+    }
 
     private companion object {
         const val BNN_SOURCE_ID = "bnn"

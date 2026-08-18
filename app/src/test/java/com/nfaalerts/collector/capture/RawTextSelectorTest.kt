@@ -37,7 +37,7 @@ class RawTextSelectorTest {
                     ),
             )
 
-        assertEquals("one \n two", result.rawText)
+        assertEquals("one ", result.rawText)
         assertEquals(RawTextField.TEXT_LINES, result.selectedField)
     }
 

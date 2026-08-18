@@ -28,7 +28,7 @@ object RawTextSelector {
         val preserved = candidates.mapValues { (_, values) -> values.toList() }
         val selected = orderedFields.firstOrNull { preserved[it]?.isNotEmpty() == true }
         return RawTextSelection(
-            rawText = selected?.let { preserved.getValue(it).joinToString("\n") },
+            rawText = selected?.let { preserved.getValue(it).first() },
             selectedField = selected,
             candidates = preserved,
         )

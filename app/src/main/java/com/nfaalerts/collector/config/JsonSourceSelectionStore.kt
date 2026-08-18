@@ -18,8 +18,9 @@ import java.nio.charset.StandardCharsets
 
 class JsonSourceSelectionStore(
     context: Context,
+    fileName: String = FILE_NAME,
 ) : SourceSelectionStore {
-    private val file = AtomicFile(File(context.filesDir, FILE_NAME))
+    private val file = AtomicFile(File(context.filesDir, fileName))
 
     override suspend fun load(): List<SourceSelection> =
         withContext(Dispatchers.IO) {
@@ -27,7 +28,12 @@ class JsonSourceSelectionStore(
                 return@withContext emptyList()
             }
             val root = Json.parseToJsonElement(file.openRead().bufferedReader().use { it.readText() }).jsonObject
-            check(root.getValue("version").jsonPrimitive.content == FORMAT_VERSION.toString())
+            val version =
+                root["configVersion"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
+            if (version != FORMAT_VERSION) {
+                throw InvalidSelectionConfigException("UNKNOWN_CONFIG_VERSION")
+            }
             root.getValue("sources").jsonArray.map { element ->
                 val value = element.jsonObject
                 SourceSelection(
@@ -70,7 +76,7 @@ class JsonSourceSelectionStore(
                                     )
                                 },
                             ),
-                        "version" to JsonPrimitive(FORMAT_VERSION),
+                        "configVersion" to JsonPrimitive(FORMAT_VERSION),
                     ),
                 ).toString()
             val stream = file.startWrite()
@@ -87,6 +93,6 @@ class JsonSourceSelectionStore(
 
     private companion object {
         const val FORMAT_VERSION = 1
-        const val FILE_NAME = "collector-source-selection-v1.json"
+        const val FILE_NAME = "collector-config.json"
     }
 }

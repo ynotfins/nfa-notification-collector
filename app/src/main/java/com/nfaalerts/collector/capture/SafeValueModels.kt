@@ -27,6 +27,18 @@ data class SafeRemoteInputValue(
     val label: String?,
     val allowFreeFormInput: Boolean,
     val allowedDataTypes: Set<String>,
+    val choices: List<String> = emptyList(),
+    val editChoicesBeforeSending: Int? = null,
+    val extras: Any? = null,
+)
+
+data class SafePersonValue(
+    val name: String?,
+    val uri: String?,
+    val key: String?,
+    val isBot: Boolean,
+    val isImportant: Boolean,
+    val icon: Any?,
 )
 
 data class SafeActionValue(
@@ -36,10 +48,16 @@ data class SafeActionValue(
     val authenticationRequired: Boolean,
     val remoteInputs: List<SafeRemoteInputValue>,
     val hasPendingIntent: Boolean,
+    val icon: Any? = null,
+    val extras: Any? = null,
+    val contextual: Boolean? = null,
 )
 
 data class SafeMessageValue(
     val text: String?,
     val timestampEpochMillis: Long,
-    val sender: String?,
+    val sender: SafePersonValue?,
+    val dataMimeType: String? = null,
+    val dataUri: String? = null,
+    val extras: Any? = null,
 )

@@ -1,6 +1,8 @@
 package com.nfaalerts.collector.data
 
 import androidx.room3.Room
+import androidx.room3.executeSQL
+import androidx.room3.useWriterConnection
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
@@ -48,17 +50,59 @@ class CaptureDatabaseInstrumentedTest {
         }
 
     @Test
-    fun captureAndInitialOutboxInsertRollBackTogether() =
+    fun triggerFailureAfterCaptureInsertRollsBackTheWholeTransaction() =
         runBlocking {
             val writer = database.captureWriteDao()
-            writer.insertCapture(capture("existing", "bnn"), outbox("existing", DeliveryState.PENDING))
+            database.useWriterConnection { connection ->
+                connection.executeSQL(
+                    """
+                    CREATE TRIGGER abort_outbox_insert
+                    BEFORE INSERT ON delivery_outbox
+                    BEGIN
+                      SELECT RAISE(ABORT, 'forced outbox failure');
+                    END
+                    """.trimIndent(),
+                )
+            }
 
             runCatching {
-                writer.insertCapture(capture("must-roll-back", "bnn"), outbox("existing", DeliveryState.PENDING))
+                writer.insertCapture(
+                    capture("must-roll-back", "bnn"),
+                    outbox("must-roll-back", DeliveryState.PENDING),
+                )
             }
 
             assertNull(database.captureReadDao().capture("must-roll-back"))
-            assertEquals(1, database.captureReadDao().captureCount())
+            assertEquals(0, database.captureReadDao().captureCount())
+        }
+
+    @Test
+    fun fileBackedCaptureAndOutboxSurviveCloseAndReopen() =
+        runBlocking {
+            database.close()
+            val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+            val name = "capture-reopen-${System.nanoTime()}.db"
+            try {
+                database = Room.databaseBuilder(context, NfaCollectorDatabase::class.java, name).build()
+                database.captureWriteDao().insertCapture(
+                    capture("durable", "bnn"),
+                    outbox("durable", DeliveryState.PENDING),
+                )
+                database.close()
+
+                database = Room.databaseBuilder(context, NfaCollectorDatabase::class.java, name).build()
+                assertEquals("durable", database.captureReadDao().capture("durable")?.eventId)
+                assertEquals(DeliveryState.PENDING, database.captureReadDao().outbox("durable")?.state)
+            } finally {
+                database.close()
+                context.deleteDatabase(name)
+                database =
+                    Room
+                        .inMemoryDatabaseBuilder(
+                            context,
+                            NfaCollectorDatabase::class.java,
+                        ).build()
+            }
         }
 
     @Test
