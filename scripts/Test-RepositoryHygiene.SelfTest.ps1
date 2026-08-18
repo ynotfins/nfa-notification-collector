@@ -32,6 +32,9 @@ try {
     Write-FixtureFile 'outbox.db' 'not-a-database'
     Write-FixtureFile 'outbox.db-wal' 'not-a-database'
     Write-FixtureFile 'outbox.db-shm' 'not-a-database'
+    Write-FixtureFile 'outbox.db-journal' 'not-a-database'
+    Write-FixtureFile 'outbox.sqlite-journal' 'not-a-database'
+    Write-FixtureFile 'outbox.sqlite3-journal' 'not-a-database'
     Write-FixtureFile 'feature/src/main/AndroidManifest.xml' @'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -62,6 +65,9 @@ try {
         'outbox.db:error=prohibited_tracked_file',
         'outbox.db-wal:error=prohibited_tracked_file',
         'outbox.db-shm:error=prohibited_tracked_file',
+        'outbox.db-journal:error=prohibited_tracked_file',
+        'outbox.sqlite-journal:error=prohibited_tracked_file',
+        'outbox.sqlite3-journal:error=prohibited_tracked_file',
         'feature/src/main/androidmanifest.xml:error=query_all_packages_outside_debug'
     )) {
         if (-not $renderedOutput.Contains($expectedLabel)) {

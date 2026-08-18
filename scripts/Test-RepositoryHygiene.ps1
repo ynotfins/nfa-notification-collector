@@ -81,7 +81,7 @@ function Test-TrackedFiles {
         '(^|/)\.env[^/]*$',
         '(^|/)local\.properties$',
         '\.(jks|keystore|p12)$',
-        '(?i)\.(db|sqlite|sqlite3)(-(wal|shm))?$',
+        '(?i)\.(db|sqlite|sqlite3)(-(wal|shm|journal))?$',
         '(?i)(^|/)(captures|notification-captures|captured-notifications)(/|$)',
         '(?i)(^|/)[^/]*(real[-_]?notification|notification[-_]?capture|captured[-_]?notification)[^/]*\.(json|txt|xml|csv|log)$',
         '\.(apk|aab)$',
