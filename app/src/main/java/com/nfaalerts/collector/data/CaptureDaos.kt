@@ -35,7 +35,28 @@ interface CaptureReadDao {
 
     @Query("SELECT COUNT(*) FROM captured_notifications")
     suspend fun captureCount(): Int
+
+    @Query(
+        """
+        SELECT c.eventId, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId
+        FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
+        ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
+        """,
+    )
+    suspend fun recentDeliveryInspection(limit: Int): List<DeliveryInspection>
 }
+
+data class DeliveryInspection(
+    val eventId: String,
+    val sourceId: String,
+    val capturedAtEpochMillis: Long,
+    val state: DeliveryState,
+    val attemptCount: Int,
+    val lastHttpStatus: Int?,
+    val lastErrorCode: String?,
+    val serverIngestId: String?,
+)
 
 @Dao
 abstract class DeliveryDao {
@@ -206,6 +227,19 @@ abstract class DeliveryDao {
         """,
     )
     abstract suspend fun nextDueAtEpochMillis(): Long?
+
+    @Query(
+        """
+        UPDATE delivery_outbox
+        SET state = 'PENDING', nextAttemptAtEpochMillis = NULL, leaseOwner = NULL,
+            leaseExpiresAtEpochMillis = NULL, updatedAtEpochMillis = :nowEpochMillis
+        WHERE eventId = :eventId AND state IN ('RETRY_WAIT', 'PAUSED_AUTH', 'QUARANTINED')
+        """,
+    )
+    abstract suspend fun retryFromOperator(
+        eventId: String,
+        nowEpochMillis: Long,
+    ): Int
 }
 
 data class RetentionCandidate(

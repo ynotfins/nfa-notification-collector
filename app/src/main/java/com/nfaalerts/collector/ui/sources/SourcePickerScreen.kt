@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -76,30 +78,34 @@ fun SourcePickerScreen(
             )
         }
         if (maximumReached) Text("Maximum 10 sources")
-        visible.forEach { app ->
-            val selected = app.packageName in snapshot.packageNames
-            SourcePickerRow(
-                app = app,
-                selected = selected,
-                onToggle = {
-                    if (selected) {
-                        scope.launch {
-                            repository.remove(app.packageName)
-                            maximumReached = false
-                        }
-                    } else {
-                        val sourceId = sourceIdForPackage(app.packageName)
-                        if (sourceId == "bnn") {
-                            pendingBnn = app
-                        } else {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(visible, key = InstalledApp::packageName) { app ->
+                val selected = app.packageName in snapshot.packageNames
+                SourcePickerRow(
+                    app = app,
+                    selected = selected,
+                    onToggle = {
+                        if (selected) {
                             scope.launch {
-                                maximumReached =
-                                    repository.upsert(app.selection(sourceId, false)) is SelectionUpdate.MaximumReached
+                                repository.remove(app.packageName)
+                                maximumReached = false
+                            }
+                        } else {
+                            val sourceId = sourceIdForPackage(app.packageName)
+                            if (sourceId == "bnn") {
+                                pendingBnn = app
+                            } else {
+                                scope.launch {
+                                    maximumReached =
+                                        repository.upsert(
+                                            app.selection(sourceId, false),
+                                        ) is SelectionUpdate.MaximumReached
+                                }
                             }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
     }
 

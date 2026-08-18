@@ -51,13 +51,13 @@ class AppContainer(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val configStore = AtomicCollectorConfigStore(application.applicationContext)
+    internal val configStore = AtomicCollectorConfigStore(application.applicationContext)
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
     val listenerStatus = ListenerStatusRepository()
     private val database: NfaCollectorDatabase by lazy(databaseFactory)
-    private val bearerStore = AndroidKeystoreBearerStore(application.applicationContext)
+    internal val bearerStore = AndroidKeystoreBearerStore(application.applicationContext)
     private val deliveryStore by lazy { RoomDeliveryStore(database) }
     private val ingestClient =
         OkHttpIngestClient(
@@ -121,6 +121,14 @@ class AppContainer(
     }
 
     suspend fun nextDeliveryDueAt(): Long? = database.deliveryDao().nextDueAtEpochMillis()
+
+    internal suspend fun recentDeliveryInspection() = database.captureReadDao().recentDeliveryInspection(100)
+
+    internal suspend fun retryDeliveryFromUi(eventId: String): Boolean {
+        val changed = database.deliveryDao().retryFromOperator(eventId, clock()) == 1
+        if (changed) deliveryScheduler.ensureScheduled(clock())
+        return changed
+    }
 
     suspend fun recoverExpiredSending(): Int = database.deliveryDao().recoverStaleSending(clock())
 

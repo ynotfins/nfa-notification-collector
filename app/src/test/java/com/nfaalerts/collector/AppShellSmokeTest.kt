@@ -22,7 +22,7 @@ class AppShellSmokeTest {
         assertTrue(applicationSource.contains("class NfaCollectorApp"))
         assertTrue(applicationSource.contains("initializeOnIo()"))
         assertFalse(applicationSource.contains("runBlocking("))
-        assertTrue(activitySource.contains("NFA Notification Collector"))
-        assertTrue(activitySource.contains("Readiness: setup required"))
+        assertTrue(activitySource.contains("CollectorHomeScreen"))
+        assertTrue(activitySource.contains("ACTION_NOTIFICATION_LISTENER_SETTINGS"))
     }
 }
