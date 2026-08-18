@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.util.concurrent.atomic.AtomicLong
 
 data class ListenerStatus(
     val connected: Boolean = false,
@@ -37,7 +36,6 @@ class ListenerStatusRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : CaptureDispatchDiagnostics {
     private val mutableState = MutableStateFlow(ListenerStatus())
-    private val activeWorkers = AtomicLong()
     val state: StateFlow<ListenerStatus> = mutableState.asStateFlow()
 
     fun onListenerConnected() {
@@ -49,8 +47,8 @@ class ListenerStatusRepository(
     }
 
     override fun onDispatchStarted() {
-        val active = activeWorkers.incrementAndGet().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         mutableState.update {
+            val active = if (it.activeWorkers == Int.MAX_VALUE) Int.MAX_VALUE else it.activeWorkers + 1
             it.copy(
                 dispatchedCount = it.dispatchedCount + 1,
                 activeWorkers = active,
@@ -60,8 +58,7 @@ class ListenerStatusRepository(
     }
 
     override fun onDispatchFinished() {
-        val active = activeWorkers.updateAndGet { value -> maxOf(0, value - 1) }.toInt()
-        mutableState.update { it.copy(activeWorkers = active) }
+        mutableState.update { it.copy(activeWorkers = maxOf(0, it.activeWorkers - 1)) }
     }
 
     override fun onDispatchRejected() {

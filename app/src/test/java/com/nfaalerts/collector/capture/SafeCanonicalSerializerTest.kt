@@ -164,6 +164,39 @@ class SafeCanonicalSerializerTest {
     }
 
     @Test
+    fun `reversed unsupported sets are deterministic independent of source iteration path`() {
+        val serializer = SafeCanonicalSerializer()
+        val first = serializer.serialize(linkedSetOf(UnknownAlpha(), UnknownBeta()), identity)
+        val second = serializer.serialize(linkedSetOf(UnknownBeta(), UnknownAlpha()), identity)
+
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `oversized string map key propagates the string limit`() {
+        val result =
+            SafeCanonicalSerializer(SafeSerializerLimits(maxStringUtf8Bytes = 3)).serialize(
+                mapOf("oversized" to "value"),
+                identity,
+            )
+
+        assertTrue(result is CanonicalSerialization.LimitExceeded)
+        result as CanonicalSerialization.LimitExceeded
+        assertEquals("maxStringUtf8Bytes", result.limitName)
+        assertEquals("\$key", result.path)
+    }
+
+    @Test
+    fun `non limit map key conversion failure remains isolated`() {
+        val result = SafeCanonicalSerializer().serialize(mapOf(BrokenCharSequence() to "value"), identity)
+
+        assertTrue(result is CanonicalSerialization.Success)
+        result as CanonicalSerialization.Success
+        assertTrue(result.json, result.json.contains("key_conversion_failure"))
+        assertTrue(result.json.contains("value"))
+    }
+
+    @Test
     fun `depth array string node and envelope limits return minimal immutable limit envelopes`() {
         val cases =
             listOf(
@@ -199,6 +232,23 @@ class SafeCanonicalSerializerTest {
             calls += 1
             return "must-not-run"
         }
+    }
+
+    private class UnknownAlpha
+
+    private class UnknownBeta
+
+    private class BrokenCharSequence : CharSequence {
+        override val length: Int = 1
+
+        override fun get(index: Int): Char = 'x'
+
+        override fun subSequence(
+            startIndex: Int,
+            endIndex: Int,
+        ): CharSequence = this
+
+        override fun toString(): String = error("key conversion")
     }
 
     private class BrokenKeysMap : Map<Any, Any?> {

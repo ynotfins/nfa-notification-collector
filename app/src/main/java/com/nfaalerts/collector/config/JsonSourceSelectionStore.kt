@@ -19,22 +19,77 @@ import java.nio.charset.StandardCharsets
 class JsonSourceSelectionStore(
     context: Context,
     fileName: String = FILE_NAME,
+    legacyFileName: String = LEGACY_FILE_NAME,
 ) : SourceSelectionStore {
     private val file = AtomicFile(File(context.filesDir, fileName))
+    private val legacyFile = AtomicFile(File(context.filesDir, legacyFileName))
 
     override suspend fun load(): List<SourceSelection> =
         withContext(Dispatchers.IO) {
-            if (!file.baseFile.exists()) {
-                return@withContext emptyList()
+            migrateLegacyIfPresent()
+            if (!file.baseFile.exists()) emptyList() else parseCanonical(read(file)).sources()
+        }
+
+    override suspend fun save(selections: List<SourceSelection>) {
+        withContext(Dispatchers.IO) {
+            validateSelections(selections)
+            val existing = if (file.baseFile.exists()) parseCanonical(read(file)) else emptyCanonicalRoot()
+            writeAndValidate(existing.withSources(selections), selections)
+            if (legacyFile.baseFile.exists()) {
+                legacyFile.delete()
             }
-            val root = Json.parseToJsonElement(file.openRead().bufferedReader().use { it.readText() }).jsonObject
-            val version =
-                root["configVersion"]?.jsonPrimitive?.content?.toIntOrNull()
-                    ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
-            if (version != FORMAT_VERSION) {
-                throw InvalidSelectionConfigException("UNKNOWN_CONFIG_VERSION")
-            }
-            root.getValue("sources").jsonArray.map { element ->
+        }
+    }
+
+    private fun migrateLegacyIfPresent() {
+        if (!legacyFile.baseFile.exists()) return
+        val legacyRoot = parseRoot(read(legacyFile))
+        val version =
+            legacyRoot["version"]?.jsonPrimitive?.content?.toIntOrNull()
+                ?: throw InvalidSelectionConfigException("INVALID_LEGACY_CONFIG")
+        if (version != FORMAT_VERSION) {
+            throw InvalidSelectionConfigException("UNKNOWN_LEGACY_CONFIG_VERSION")
+        }
+        val selections = legacyRoot.sources()
+        validateSelections(selections)
+        val existing = if (file.baseFile.exists()) parseCanonical(read(file)) else emptyCanonicalRoot()
+        writeAndValidate(existing.withSources(selections), selections)
+        legacyFile.delete()
+    }
+
+    private fun writeAndValidate(
+        root: JsonObject,
+        expectedSelections: List<SourceSelection>,
+    ) {
+        write(file, root.toString())
+        val reopened = parseCanonical(read(file)).sources()
+        if (reopened != expectedSelections.sortedBy(SourceSelection::packageName)) {
+            throw InvalidSelectionConfigException("CONFIG_WRITE_VALIDATION_FAILED")
+        }
+    }
+
+    private fun parseCanonical(content: String): JsonObject {
+        val root = parseRoot(content)
+        val version =
+            root["configVersion"]?.jsonPrimitive?.content?.toIntOrNull()
+                ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
+        if (version != FORMAT_VERSION) {
+            throw InvalidSelectionConfigException("UNKNOWN_CONFIG_VERSION")
+        }
+        root["sources"]?.jsonArray ?: throw InvalidSelectionConfigException("INVALID_CONFIG")
+        return root
+    }
+
+    private fun parseRoot(content: String): JsonObject =
+        try {
+            Json.parseToJsonElement(content).jsonObject
+        } catch (_: Exception) {
+            throw InvalidSelectionConfigException("INVALID_CONFIG")
+        }
+
+    private fun JsonObject.sources(): List<SourceSelection> =
+        (this["sources"]?.jsonArray ?: throw InvalidSelectionConfigException("INVALID_CONFIG"))
+            .map { element ->
                 val value = element.jsonObject
                 SourceSelection(
                     packageName = value.getValue("packageName").jsonPrimitive.content,
@@ -47,52 +102,76 @@ class JsonSourceSelectionStore(
                             .getValue("rawTextOrder")
                             .jsonArray
                             .mapNotNull { field ->
-                                RawTextField.entries.firstOrNull {
-                                    it.configValue == field.jsonPrimitive.content
-                                }
+                                RawTextField.entries.firstOrNull { it.configValue == field.jsonPrimitive.content }
                             }.ifEmpty { RawTextField.DEFAULT_ORDER },
                 )
-            }
-        }
+            }.sortedBy(SourceSelection::packageName)
 
-    override suspend fun save(selections: List<SourceSelection>) {
-        withContext(Dispatchers.IO) {
-            val payload =
+    private fun JsonObject.withSources(selections: List<SourceSelection>): JsonObject =
+        JsonObject(
+            toMutableMap().apply {
+                put("configVersion", JsonPrimitive(FORMAT_VERSION))
+                put("sources", selectionsJson(selections))
+            },
+        )
+
+    private fun selectionsJson(selections: List<SourceSelection>) =
+        JsonArray(
+            selections.sortedBy(SourceSelection::packageName).map { source ->
                 JsonObject(
                     sortedMapOf(
-                        "sources" to
-                            JsonArray(
-                                selections.sortedBy(SourceSelection::packageName).map { source ->
-                                    JsonObject(
-                                        sortedMapOf(
-                                            "appLabel" to JsonPrimitive(source.appLabel),
-                                            "bnnMappingConfirmed" to JsonPrimitive(source.bnnMappingConfirmed),
-                                            "enabled" to JsonPrimitive(source.enabled),
-                                            "packageName" to JsonPrimitive(source.packageName),
-                                            "rawTextOrder" to
-                                                JsonArray(source.rawTextOrder.map { JsonPrimitive(it.configValue) }),
-                                            "sourceId" to JsonPrimitive(source.sourceId),
-                                        ),
-                                    )
-                                },
-                            ),
-                        "configVersion" to JsonPrimitive(FORMAT_VERSION),
+                        "appLabel" to JsonPrimitive(source.appLabel),
+                        "bnnMappingConfirmed" to JsonPrimitive(source.bnnMappingConfirmed),
+                        "enabled" to JsonPrimitive(source.enabled),
+                        "packageName" to JsonPrimitive(source.packageName),
+                        "rawTextOrder" to JsonArray(source.rawTextOrder.map { JsonPrimitive(it.configValue) }),
+                        "sourceId" to JsonPrimitive(source.sourceId),
                     ),
-                ).toString()
-            val stream = file.startWrite()
-            try {
-                stream.write(payload.toByteArray(StandardCharsets.UTF_8))
-                stream.fd.sync()
-                file.finishWrite(stream)
-            } catch (failure: Throwable) {
-                file.failWrite(stream)
-                throw failure
-            }
+                )
+            },
+        )
+
+    private fun validateSelections(selections: List<SourceSelection>) {
+        if (selections.size > MAX_SELECTED_SOURCES) throw InvalidSelectionConfigException("TOO_MANY_SOURCES")
+        if (selections.map(SourceSelection::packageName).toSet().size != selections.size) {
+            throw InvalidSelectionConfigException("DUPLICATE_SOURCE_PACKAGE")
+        }
+        if (selections.any { it.packageName.isBlank() || it.sourceId.isBlank() || it.rawTextOrder.isEmpty() }) {
+            throw InvalidSelectionConfigException("INVALID_SOURCE")
+        }
+        if (selections.any { it.sourceId == "bnn" && !it.bnnMappingConfirmed }) {
+            throw InvalidSelectionConfigException("BNN_CONFIRMATION_REQUIRED")
+        }
+    }
+
+    private fun emptyCanonicalRoot() =
+        JsonObject(
+            linkedMapOf(
+                "configVersion" to JsonPrimitive(FORMAT_VERSION),
+                "sources" to JsonArray(emptyList()),
+            ),
+        )
+
+    private fun read(atomicFile: AtomicFile): String = atomicFile.openRead().bufferedReader().use { it.readText() }
+
+    private fun write(
+        atomicFile: AtomicFile,
+        payload: String,
+    ) {
+        val stream = atomicFile.startWrite()
+        try {
+            stream.write(payload.toByteArray(StandardCharsets.UTF_8))
+            stream.fd.sync()
+            atomicFile.finishWrite(stream)
+        } catch (failure: Throwable) {
+            atomicFile.failWrite(stream)
+            throw failure
         }
     }
 
     private companion object {
         const val FORMAT_VERSION = 1
         const val FILE_NAME = "collector-config.json"
+        const val LEGACY_FILE_NAME = "collector-source-selection-v1.json"
     }
 }

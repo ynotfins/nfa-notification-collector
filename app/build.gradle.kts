@@ -50,8 +50,11 @@ dependencies {
     ksp(libs.androidx.room3.compiler)
 
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.compose.ui.test.manifest)
+    androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.compose.ui.test.junit4)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)
 }

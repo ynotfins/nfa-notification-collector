@@ -69,6 +69,79 @@ class ConfigAndRepositoryInstrumentedTest {
         }
 
     @Test
+    fun legacySelectionFileMigratesAtomicallyWithoutLossAndIsRetiredAfterReopen() =
+        runBlocking {
+            val suffix = System.nanoTime()
+            val canonicalName = "collector-migrated-$suffix.json"
+            val legacyName = "collector-legacy-$suffix.json"
+            val legacy = File(context.filesDir, legacyName)
+            val canonical = File(context.filesDir, canonicalName)
+            try {
+                legacy.writeText(
+                    """{"version":1,"sources":[{"appLabel":"Legacy","bnnMappingConfirmed":false,"enabled":true,"packageName":"com.example.legacy","rawTextOrder":["bigText","text"],"sourceId":"other"}]}""",
+                )
+                val store = JsonSourceSelectionStore(context, canonicalName, legacyName)
+
+                val migrated = store.load()
+                val reopened = JsonSourceSelectionStore(context, canonicalName, legacyName).load()
+
+                assertEquals("com.example.legacy", migrated.single().packageName)
+                assertEquals(migrated, reopened)
+                assertTrue(canonical.exists())
+                assertFalse(legacy.exists())
+            } finally {
+                canonical.delete()
+                File(context.filesDir, "$canonicalName.bak").delete()
+                legacy.delete()
+            }
+        }
+
+    @Test
+    fun savingSourcesPreservesExistingCanonicalNonSecretFieldsAndUnknownVersionBytes() =
+        runBlocking {
+            val suffix = System.nanoTime()
+            val mergeName = "collector-merge-$suffix.json"
+            val unknownName = "collector-untouched-$suffix.json"
+            val blockedLegacyName = "collector-blocked-legacy-$suffix.json"
+            val mergeFile = File(context.filesDir, mergeName)
+            val unknownFile = File(context.filesDir, unknownName)
+            val blockedLegacyFile = File(context.filesDir, blockedLegacyName)
+            val original =
+                """{"configVersion":1,"deviceId":"nfa-primary-phone","endpoint":{"url":"https://example.invalid","headers":["a","b"]},"retry":{"base":30},"futureSafe":{"nested":[1,true,null]},"sources":[]}"""
+            val unknown = " { \"configVersion\" : 2, \"future\" : {\"bytes\": [3,2,1]} } "
+            try {
+                mergeFile.writeText(original)
+                unknownFile.writeText(unknown)
+                blockedLegacyFile.writeText("{\"version\":1,\"sources\":[]}")
+                val before = Json.parseToJsonElement(original).jsonObject
+
+                JsonSourceSelectionStore(context, mergeName).save(listOf(source("com.example.new")))
+                val after = Json.parseToJsonElement(mergeFile.readText()).jsonObject
+                val unknownResult =
+                    runCatching {
+                        JsonSourceSelectionStore(context, unknownName, blockedLegacyName).load()
+                    }
+
+                assertEquals(before.getValue("deviceId"), after.getValue("deviceId"))
+                assertEquals(before.getValue("endpoint").toString(), after.getValue("endpoint").toString())
+                assertEquals(before.getValue("retry").toString(), after.getValue("retry").toString())
+                assertEquals(before.getValue("futureSafe").toString(), after.getValue("futureSafe").toString())
+                assertEquals(
+                    "com.example.new",
+                    JsonSourceSelectionStore(context, mergeName).load().single().packageName,
+                )
+                assertTrue(unknownResult.exceptionOrNull() is InvalidSelectionConfigException)
+                assertEquals(unknown, unknownFile.readText())
+                assertTrue(blockedLegacyFile.exists())
+            } finally {
+                mergeFile.delete()
+                File(context.filesDir, "$mergeName.bak").delete()
+                unknownFile.delete()
+                blockedLegacyFile.delete()
+            }
+        }
+
+    @Test
     fun installedAppRepositoryReturnsActualLabelIconAndClassification() =
         runBlocking {
             val app =

@@ -44,6 +44,12 @@ class AndroidNotificationCaptureInstrumentedTest {
                 .setEditChoicesBeforeSending(android.app.RemoteInput.EDIT_CHOICES_BEFORE_SENDING_ENABLED)
                 .addExtras(Bundle().apply { putString("remote-extra", "remote-value") })
                 .build()
+        val dataOnlyRemoteInput =
+            android.app.RemoteInput
+                .Builder("attachment")
+                .setAllowFreeFormInput(false)
+                .setAllowDataType("image/jpeg", true)
+                .build()
         val action =
             Notification.Action
                 .Builder(
@@ -51,6 +57,8 @@ class AndroidNotificationCaptureInstrumentedTest {
                     "Open",
                     pendingIntent,
                 ).addRemoteInput(remoteInput)
+                .addRemoteInput(dataOnlyRemoteInput)
+                .setAllowGeneratedReplies(false)
                 .setContextual(true)
                 .setAuthenticationRequired(true)
                 .addExtras(Bundle().apply { putString("action-extra", "action-value") })
@@ -105,6 +113,14 @@ class AndroidNotificationCaptureInstrumentedTest {
         assertTrue(result.json.contains("contextual"))
         assertTrue(result.json.contains("authenticationRequired"))
         assertTrue(result.json.contains("remote-value"))
+        assertTrue(result.json.contains("dataOnlyRemoteInputs"))
+        assertTrue(result.json.contains("allowGeneratedReplies"))
+        assertTrue(result.json.contains("attachment"))
+        assertTrue(result.json.contains("image/jpeg"))
+        assertTrue(result.json.windowed("\"value\":\"reply\"".length).count { it == "\"value\":\"reply\"" } == 1)
+        assertTrue(
+            result.json.windowed("\"value\":\"attachment\"".length).count { it == "\"value\":\"attachment\"" } == 1,
+        )
         assertTrue(result.json.contains("editChoicesBeforeSending"))
         assertTrue(result.json.contains("choices"))
         assertTrue(result.json.contains("image/png"))

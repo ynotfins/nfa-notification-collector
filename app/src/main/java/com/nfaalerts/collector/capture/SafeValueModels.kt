@@ -48,6 +48,8 @@ data class SafeActionValue(
     val authenticationRequired: Boolean,
     val remoteInputs: List<SafeRemoteInputValue>,
     val hasPendingIntent: Boolean,
+    val dataOnlyRemoteInputs: List<SafeRemoteInputValue> = emptyList(),
+    val allowGeneratedReplies: Boolean = false,
     val icon: Any? = null,
     val extras: Any? = null,
     val contextual: Boolean? = null,

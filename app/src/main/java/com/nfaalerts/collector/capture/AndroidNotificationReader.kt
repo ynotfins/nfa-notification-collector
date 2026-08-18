@@ -81,6 +81,8 @@ object AndroidNotificationReader {
                     false
                 },
             remoteInputs = action.remoteInputs?.map(::safeRemoteInput).orEmpty(),
+            dataOnlyRemoteInputs = action.dataOnlyRemoteInputs?.map(::safeRemoteInput).orEmpty(),
+            allowGeneratedReplies = action.allowGeneratedReplies,
             hasPendingIntent = action.actionIntent != null,
             icon = action.icon,
             extras = action.extras,

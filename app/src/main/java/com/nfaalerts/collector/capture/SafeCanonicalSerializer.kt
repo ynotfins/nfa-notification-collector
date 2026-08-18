@@ -299,8 +299,17 @@ class SafeCanonicalSerializer(
             val objectValues = linkedMapOf<String, JsonElement>()
             entries.groupBy { it.key.baseKey }.toSortedMap().forEach { (key, collisions) ->
                 objectValues[key] =
-                    if (collisions.size == 1) {
+                    if (collisions.size == 1 && collisions.single().key.plainString) {
                         collisions.single().value
+                    } else if (collisions.size == 1) {
+                        JsonObject(
+                            sortedMapOf(
+                                "key" to collisions.single().key.json,
+                                "marker" to JsonPrimitive("encoded_map_key"),
+                                "type" to JsonPrimitive("map_entry"),
+                                "value" to collisions.single().value,
+                            ),
+                        )
                     } else {
                         JsonObject(
                             sortedMapOf(
@@ -364,7 +373,8 @@ class SafeCanonicalSerializer(
                 if (elements.size >= limits.maxArrayEntries) {
                     throw LimitBreach("maxArrayEntries", path, elements.size + 1, "array")
                 }
-                elements += encode(iterator.next(), "$path[${elements.size}]", depth + 1, state)
+                val elementPath = if (ordered) "$path[${elements.size}]" else "$path[*]"
+                elements += encode(iterator.next(), elementPath, depth + 1, state)
             }
             JsonArray(if (ordered) elements else elements.sortedBy(JsonElement::toString))
         }
@@ -413,6 +423,7 @@ class SafeCanonicalSerializer(
         encodeMap(
             mapOf(
                 "authenticationRequired" to value.authenticationRequired,
+                "allowGeneratedReplies" to value.allowGeneratedReplies,
                 "contextual" to value.contextual,
                 "extras" to value.extras,
                 "icon" to value.icon,
@@ -423,6 +434,7 @@ class SafeCanonicalSerializer(
                         null
                     },
                 "remoteInputs" to value.remoteInputs,
+                "dataOnlyRemoteInputs" to value.dataOnlyRemoteInputs,
                 "semanticAction" to value.semanticAction,
                 "showsUserInterface" to value.showsUserInterface,
                 "title" to value.title,
@@ -557,33 +569,38 @@ class SafeCanonicalSerializer(
         try {
             when (value) {
                 null -> {
-                    EncodedMapKey("null", typed("null", JsonNull))
+                    EncodedMapKey("null", typed("null", JsonNull), plainString = false)
                 }
 
                 is String -> {
-                    EncodedMapKey(value, encodeString(value, "\$key"))
+                    EncodedMapKey(value, encodeString(value, "\$key"), plainString = true)
+                }
+
+                is CharSequence -> {
+                    val text = value.toString()
+                    EncodedMapKey(text, encodeString(text, "\$key"), plainString = true)
                 }
 
                 is Boolean -> {
-                    EncodedMapKey(value.toString(), typed("boolean", JsonPrimitive(value)))
+                    EncodedMapKey(value.toString(), typed("boolean", JsonPrimitive(value)), plainString = false)
                 }
 
                 is Byte, is Short, is Int, is Long -> {
                     val number = (value as Number).toLong()
-                    EncodedMapKey(number.toString(), typed("integer", JsonPrimitive(number)))
+                    EncodedMapKey(number.toString(), typed("integer", JsonPrimitive(number)), plainString = false)
                 }
 
                 is Float, is Double -> {
                     val number = (value as Number).toDouble()
-                    EncodedMapKey(number.toString(), typed("number", JsonPrimitive(number)))
+                    EncodedMapKey(number.toString(), typed("number", JsonPrimitive(number)), plainString = false)
                 }
 
                 is Char -> {
-                    EncodedMapKey(value.toString(), encodeString(value.toString(), "\$key"))
+                    EncodedMapKey(value.toString(), encodeString(value.toString(), "\$key"), plainString = false)
                 }
 
                 is Enum<*> -> {
-                    EncodedMapKey(value.name, typed("enum", JsonPrimitive(value.name)))
+                    EncodedMapKey(value.name, typed("enum", JsonPrimitive(value.name)), plainString = false)
                 }
 
                 else -> {
@@ -597,9 +614,12 @@ class SafeCanonicalSerializer(
                                 "type" to JsonPrimitive("map_key"),
                             ),
                         ),
+                        plainString = false,
                     )
                 }
             }
+        } catch (breach: LimitBreach) {
+            throw breach
         } catch (failure: Exception) {
             val runtimeType = value?.javaClass?.name ?: "null"
             EncodedMapKey(
@@ -612,6 +632,7 @@ class SafeCanonicalSerializer(
                         "type" to JsonPrimitive("map_key"),
                     ),
                 ),
+                plainString = false,
             )
         }
 
@@ -700,6 +721,7 @@ class SafeCanonicalSerializer(
     private data class EncodedMapKey(
         val baseKey: String,
         val json: JsonElement,
+        val plainString: Boolean,
     )
 
     private data class EncodedMapEntry(

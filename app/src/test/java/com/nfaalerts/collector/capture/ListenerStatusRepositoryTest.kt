@@ -7,6 +7,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class ListenerStatusRepositoryTest {
     @Test
@@ -58,6 +61,31 @@ class ListenerStatusRepositoryTest {
         assertEquals(1L, status.state.value.workerFailureCount)
         assertEquals(IllegalStateException::class.java.name, status.state.value.lastWorkerFailureType)
         assertTrue(status.state.value.activeWorkers == 0)
+    }
+
+    @Test
+    fun `concurrent starts and finishes publish an atomic zero final backlog and exact maximum`() {
+        val workers = 32
+        val status = ListenerStatusRepository(clock = { 1L })
+        val barrier = CyclicBarrier(workers)
+        val executor = Executors.newFixedThreadPool(workers)
+        try {
+            val futures =
+                (0 until workers).map {
+                    executor.submit {
+                        status.onDispatchStarted()
+                        barrier.await(5, TimeUnit.SECONDS)
+                        status.onDispatchFinished()
+                    }
+                }
+            futures.forEach { it.get(10, TimeUnit.SECONDS) }
+        } finally {
+            executor.shutdownNow()
+        }
+
+        assertEquals(0, status.state.value.activeWorkers)
+        assertEquals(workers, status.state.value.maximumObservedBacklog)
+        assertEquals(workers.toLong(), status.state.value.dispatchedCount)
     }
 
     private fun request() =
