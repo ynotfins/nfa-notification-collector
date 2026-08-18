@@ -23,9 +23,26 @@ class MainActivity : ComponentActivity() {
             uri ?: return@registerForActivityResult
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        val payload = input.readBounded(MAX_CONFIG_BYTES + 1)
-                        if (payload.size <= MAX_CONFIG_BYTES) uiRepository.importConfig(payload)
+                    try {
+                        val input = contentResolver.openInputStream(uri)
+                        if (input == null) {
+                            uiRepository.reportImportFailure()
+                            return@withContext
+                        }
+                        input.use {
+                            val payload = it.readBounded(MAX_CONFIG_BYTES + 1)
+                            try {
+                                if (payload.size <= MAX_CONFIG_BYTES) {
+                                    uiRepository.importConfig(payload)
+                                } else {
+                                    uiRepository.reportImportOversize()
+                                }
+                            } finally {
+                                payload.fill(0)
+                            }
+                        }
+                    } catch (_: Exception) {
+                        uiRepository.reportImportFailure()
                     }
                 }
             }
@@ -35,9 +52,23 @@ class MainActivity : ComponentActivity() {
             uri ?: return@registerForActivityResult
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
-                    val payload = uiRepository.exportConfig()
-                    require(payload.size <= MAX_CONFIG_BYTES) { "CONFIG_PAYLOAD_LIMIT" }
-                    contentResolver.openOutputStream(uri)?.use { it.write(payload) }
+                    try {
+                        val payload = uiRepository.exportConfig()
+                        try {
+                            require(payload.size <= MAX_CONFIG_BYTES) { "CONFIG_PAYLOAD_LIMIT" }
+                            val output = contentResolver.openOutputStream(uri)
+                            if (output == null) {
+                                uiRepository.reportExportFailed()
+                            } else {
+                                output.use { it.write(payload) }
+                                uiRepository.reportExportSucceeded()
+                            }
+                        } finally {
+                            payload.fill(0)
+                        }
+                    } catch (_: Exception) {
+                        uiRepository.reportExportFailed()
+                    }
                 }
             }
         }

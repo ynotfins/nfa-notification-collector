@@ -81,6 +81,32 @@ class SourceSelectionRepositoryTest {
         }
 
     @Test
+    fun `invalid source is rejected without changing persisted selections`() =
+        runBlocking {
+            val store = RecordingSelectionStore()
+            val repository = SourceSelectionRepository(store)
+
+            val result = repository.upsert(selection("com.example.invalid").copy(sourceId = ""))
+
+            assertEquals(SelectionUpdate.InvalidSource("INVALID_SOURCE"), result)
+            assertTrue(repository.snapshot().selections.isEmpty())
+            assertTrue(store.lastSaved.isEmpty())
+        }
+
+    @Test
+    fun `persistence rejection is returned without publishing rejected source`() =
+        runBlocking {
+            val store =
+                RecordingSelectionStore(saveFailure = InvalidSelectionConfigException("DUPLICATE_SOURCE_PACKAGE"))
+            val repository = SourceSelectionRepository(store)
+
+            val result = repository.upsert(selection("com.example.duplicate"))
+
+            assertEquals(SelectionUpdate.DuplicateSource, result)
+            assertTrue(repository.snapshot().selections.isEmpty())
+        }
+
+    @Test
     fun `selection state flow publishes only explicitly confirmed BNN mapping`() =
         runBlocking {
             val repository = SourceSelectionRepository(RecordingSelectionStore())
@@ -182,12 +208,15 @@ class SourceSelectionRepositoryTest {
             rawTextOrder = RawTextField.DEFAULT_ORDER,
         )
 
-    private class RecordingSelectionStore : SourceSelectionStore {
+    private class RecordingSelectionStore(
+        private val saveFailure: RuntimeException? = null,
+    ) : SourceSelectionStore {
         var lastSaved: List<SourceSelection> = emptyList()
 
         override suspend fun load(): List<SourceSelection> = lastSaved
 
         override suspend fun save(selections: List<SourceSelection>) {
+            saveFailure?.let { throw it }
             lastSaved = selections.map { it.copy(rawTextOrder = it.rawTextOrder.toList()) }
         }
     }

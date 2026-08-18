@@ -19,11 +19,11 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -43,9 +43,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nfaalerts.collector.capture.RawTextField
-import com.nfaalerts.collector.config.SourceSelection
+import com.nfaalerts.collector.ui.settings.EndpointProfileDraft
+import com.nfaalerts.collector.ui.settings.SettingsDraft
 import com.nfaalerts.collector.ui.sources.SourcePickerScreen
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -133,6 +134,8 @@ fun CollectorHomeScreen(
                         requestExport,
                         tokenEntryRequested,
                         { tokenEntryRequested = false },
+                        openNotificationAccessSettings,
+                        openBatterySettings,
                         Modifier.padding(padding),
                     )
                 }
@@ -222,72 +225,21 @@ private fun SourcesScreen(
     snapshot: CollectorUiSnapshot,
     modifier: Modifier,
 ) {
-    val sources by produceState(emptyList(), repository) { value = repository.selectedSources() }
     val pickerAccess = repository as? SourcePickerUiAccess
     val apps by produceState(emptyList(), pickerAccess) { value = pickerAccess?.sourcePickerApps() ?: emptyList() }
-    var editing by remember { mutableStateOf<SourceSelection?>(null) }
-    Column(modifier.padding(16.dp)) {
-        Text("Sources (${snapshot.selectedCount} / 10)", modifier = Modifier.semantics { heading() })
-        Text("Non-BNN sources are captured locally as BLOCKED_CONTRACT until the gateway contract is approved.")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(sources, key = { it.packageName }) { source ->
-                Text(
-                    "${source.appLabel} (${source.packageName}) — ${if (source.enabled) "Enabled" else "Disabled"}; ${source.sourceId}",
-                )
-                Text("Raw priority: ${source.rawTextOrder.joinToString()}")
-                TextButton(onClick = { editing = source }) { Text("Edit source") }
-            }
+    if (pickerAccess == null) {
+        Column(modifier.padding(16.dp)) {
+            Text("Sources (${snapshot.selectedCount} / 10)", modifier = Modifier.semantics { heading() })
+            Text("Sources unavailable")
         }
-        if (pickerAccess != null) {
-            SourcePickerScreen(
-                apps = apps,
-                repository = pickerAccess.sourceSelectionRepository,
-                sourceIdForPackage = pickerAccess::sourceIdForPackage,
-            )
-        }
+    } else {
+        SourcePickerScreen(
+            apps = apps,
+            repository = pickerAccess.sourceSelectionRepository,
+            sourceIdForPackage = pickerAccess::sourceIdForPackage,
+            modifier = modifier,
+        )
     }
-    editing?.let { source -> SourceEditorDialog(source, repository as? SourcePickerUiAccess) { editing = null } }
-}
-
-@Composable
-private fun SourceEditorDialog(
-    source: SourceSelection,
-    access: SourcePickerUiAccess?,
-    dismiss: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var enabled by remember { mutableStateOf(source.enabled) }
-    var sourceId by remember { mutableStateOf(source.sourceId) }
-    var bnnConfirmed by remember { mutableStateOf(source.bnnMappingConfirmed) }
-    AlertDialog(
-        onDismissRequest = dismiss,
-        title = { Text("Edit ${source.appLabel}") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row {
-                    Text("Enabled")
-                    Switch(enabled, { enabled = it })
-                }
-                OutlinedTextField(sourceId, { sourceId = it }, label = { Text("Source ID") })
-                if (sourceId == "bnn") {
-                    Text("Confirm this exact app is BNN before it may use the BNN contract.")
-                    Switch(bnnConfirmed, { bnnConfirmed = it })
-                }
-                Text("Raw priority: ${RawTextField.DEFAULT_ORDER.joinToString()}")
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                scope.launch {
-                    access?.sourceSelectionRepository?.upsert(
-                        source.copy(enabled = enabled, sourceId = sourceId, bnnMappingConfirmed = bnnConfirmed),
-                    )
-                    dismiss()
-                }
-            }) { Text("Save source") }
-        },
-        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
-    )
 }
 
 @Composable
@@ -364,65 +316,212 @@ private fun SettingsScreen(
     requestExport: () -> Unit,
     showTokenEntry: Boolean,
     onTokenEntryHandled: () -> Unit,
+    openNotificationAccessSettings: () -> Unit,
+    openBatterySettings: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
     var tokenEntry by remember { mutableStateOf(false) }
     var tokenWarning by remember { mutableStateOf<String?>(null) }
     var editor by remember { mutableStateOf("") }
-    var errors by rememberSaveable { mutableStateOf("") }
-    Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Connection settings", modifier = Modifier.semantics { heading() })
-        Text("Active HTTPS endpoint: ${snapshot.endpoint}. Profiles do not fail over automatically.")
-        Text("Device ID: ${snapshot.deviceId}")
-        Button(
-            onClick = {
-                tokenWarning = null
-                tokenEntry = true
-            },
-            modifier = Modifier.sizeIn(minHeight = 48.dp),
-        ) { Text("Enter token") }
-        tokenWarning?.let { Text(it) }
-        Text("Retry and retention are stored in the non-secret configuration.")
-        TextButton(onClick = { scope.launch { editor = repository.formattedConfig() } }) { Text("Load current JSON") }
-        OutlinedTextField(
-            value = editor,
-            onValueChange = { editor = it },
-            label = { Text("Advanced JSON configuration") },
-            supportingText = {
-                Text(
-                    errors.ifBlank {
-                        "Save/Apply validates typed JSON paths and preserves the last good configuration."
-                    },
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = {
-                scope.launch {
-                    errors = repository.saveConfig(editor).joinToString { "${it.path}: ${it.code}" }
-                }
-            },
-            modifier = Modifier.sizeIn(minHeight = 48.dp),
-        ) { Text("Save / Apply") }
-        TextButton(onClick = {
-            scope.launch {
-                editor = repository.formattedConfig()
-                errors = ""
-            }
-        }) { Text("Reset") }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    var draft by remember { mutableStateOf<SettingsDraft?>(null) }
+    var resultText by rememberSaveable { mutableStateOf("") }
+    var addProfileName by rememberSaveable { mutableStateOf("") }
+    var addProfileBaseUrl by rememberSaveable { mutableStateOf("https://") }
+    var addProfilePath by rememberSaveable { mutableStateOf("/v1/ingest/alerts") }
+    val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
+    val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
+    LaunchedEffect(repository) {
+        draft = repository.settingsDraft()
+        editor = repository.formattedConfig()
+    }
+    LazyColumn(
+        modifier = modifier.padding(16.dp).testTag("settings-list"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item { Text("Connection settings", modifier = Modifier.semantics { heading() }) }
+        item { Text("Active HTTPS endpoint: ${snapshot.endpoint}. Profiles do not fail over automatically.") }
+        item {
             Button(
-                onClick = requestImport,
+                onClick = {
+                    tokenWarning = null
+                    tokenEntry = true
+                },
                 modifier = Modifier.sizeIn(minHeight = 48.dp),
-            ) { Text("Import configuration") }
-            Button(
-                onClick = requestExport,
-                modifier = Modifier.sizeIn(minHeight = 48.dp),
-            ) { Text("Export configuration") }
+            ) { Text("Enter token") }
         }
-        Text("Exports never include bearer credentials, captures, diagnostics, or ciphertext.")
+        tokenWarning?.let { warning -> item { Text(warning) } }
+        item { Button(onClick = openNotificationAccessSettings) { Text("Open notification access settings") } }
+        item { Button(onClick = openBatterySettings) { Text("Open battery settings") } }
+        item { Text("Endpoint profiles") }
+        draft?.profiles?.let { profiles ->
+            items(profiles, key = EndpointProfileDraft::name) { profile ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Profile: ${profile.name}${if (draft?.activeProfile == profile.name) " (active)" else ""}")
+                    OutlinedTextField(
+                        profile.baseUrl,
+                        { value -> draft = draft?.updateProfile(profile.name) { it.copy(baseUrl = value) } },
+                        label = { Text("HTTPS origin for ${profile.name}") },
+                    )
+                    OutlinedTextField(
+                        profile.ingestPath,
+                        { value -> draft = draft?.updateProfile(profile.name) { it.copy(ingestPath = value) } },
+                        label = { Text("Ingest path for ${profile.name}") },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { draft = draft?.copy(activeProfile = profile.name) }) {
+                            Text("Select active")
+                        }
+                        TextButton(
+                            onClick = { draft = draft?.removeProfile(profile.name) },
+                            enabled = (draft?.profiles?.size ?: 0) > 1,
+                        ) { Text("Remove profile") }
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Add endpoint profile")
+                OutlinedTextField(addProfileName, { addProfileName = it }, label = { Text("Profile name") })
+                OutlinedTextField(addProfileBaseUrl, { addProfileBaseUrl = it }, label = { Text("HTTPS origin") })
+                OutlinedTextField(addProfilePath, { addProfilePath = it }, label = { Text("Ingest path") })
+                TextButton(onClick = {
+                    val current = draft
+                    if (current == null || addProfileName.isBlank()) {
+                        resultText = "/endpointProfiles: PROFILE_NAME_REQUIRED — Profile name is required."
+                    } else if (current.profiles.any { it.name == addProfileName }) {
+                        resultText =
+                            "/endpointProfiles/${addProfileName.rfc6901()}: DUPLICATE_PROFILE — Profile already exists."
+                    } else {
+                        draft =
+                            current.copy(
+                                profiles =
+                                    current.profiles +
+                                        EndpointProfileDraft(addProfileName, addProfileBaseUrl, addProfilePath),
+                            )
+                        resultText = ""
+                    }
+                }) { Text("Add profile") }
+            }
+        }
+        draft?.let { current ->
+            item {
+                OutlinedTextField(
+                    current.deviceId,
+                    { draft = current.copy(deviceId = it) },
+                    label = { Text("Device ID") },
+                    modifier = Modifier.fillMaxWidth().testTag("device-id-form"),
+                )
+            }
+            item {
+                SettingsNumberField("Connect timeout (ms)", current.connectTimeoutMs) {
+                    draft =
+                        current.copy(connectTimeoutMs = it)
+                }
+            }
+            item {
+                SettingsNumberField("Read timeout (ms)", current.readTimeoutMs) {
+                    draft =
+                        current.copy(readTimeoutMs = it)
+                }
+            }
+            item {
+                SettingsNumberField("Initial backoff (ms)", current.initialBackoffMs) {
+                    draft =
+                        current.copy(initialBackoffMs = it)
+                }
+            }
+            item {
+                SettingsNumberField("Maximum backoff (ms)", current.maxBackoffMs) {
+                    draft =
+                        current.copy(maxBackoffMs = it)
+                }
+            }
+            item {
+                SettingsNumberField(
+                    "SENT retention days",
+                    current.sentDays,
+                ) { draft = current.copy(sentDays = it) }
+            }
+            item {
+                SettingsNumberField("Maximum SENT rows", current.maxSentRows) {
+                    draft =
+                        current.copy(maxSentRows = it)
+                }
+            }
+            item {
+                SettingsNumberField("Diagnostics retention days", current.diagnosticsDays) {
+                    draft =
+                        current.copy(diagnosticsDays = it)
+                }
+            }
+            item {
+                SettingsNumberField("Maximum diagnostics rows", current.diagnosticsMaxRows) {
+                    draft =
+                        current.copy(diagnosticsMaxRows = it)
+                }
+            }
+            item {
+                Button(onClick = {
+                    scope.launch {
+                        val outcome = repository.saveSettings(current)
+                        resultText = outcome.safeMessage()
+                        if (outcome.persisted) {
+                            draft = repository.settingsDraft()
+                            editor = repository.formattedConfig()
+                        }
+                    }
+                }) { Text("Save settings forms") }
+            }
+        }
+        item { Text("Advanced non-secret JSON") }
+        item {
+            OutlinedTextField(
+                value = editor,
+                onValueChange = { editor = it },
+                label = { Text("Advanced JSON configuration") },
+                modifier = Modifier.fillMaxWidth().testTag("json-config-editor"),
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    scope.launch {
+                        val errors = repository.validateConfig(editor)
+                        resultText = if (errors.isEmpty()) "Configuration is valid." else errors.display()
+                    }
+                }) { Text("Validate only") }
+                Button(onClick = {
+                    scope.launch {
+                        val outcome = repository.saveConfigOutcome(editor)
+                        resultText = outcome.safeMessage()
+                        if (outcome.persisted) {
+                            draft = repository.settingsDraft()
+                            editor = repository.formattedConfig()
+                        }
+                    }
+                }) { Text("Save / Apply") }
+            }
+        }
+        item {
+            TextButton(onClick = {
+                scope.launch {
+                    draft = repository.defaultSettingsDraft()
+                    editor = repository.defaultFormattedConfig()
+                    resultText = "Approved defaults loaded. Save to apply."
+                }
+            }) { Text("Reset to approved defaults") }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = requestImport) { Text("Import configuration") }
+                Button(onClick = requestExport) { Text("Export configuration") }
+            }
+        }
+        if (resultText.isNotBlank()) item { Text(resultText) }
+        transferFeedback?.let { message -> item { Text(message) } }
+        item { Text("Exports never include bearer credentials, captures, diagnostics, or ciphertext.") }
     }
     if (showTokenEntry || tokenEntry) {
         TokenEntryDialog(
@@ -439,6 +538,50 @@ private fun SettingsScreen(
         )
     }
 }
+
+@Composable
+private fun SettingsNumberField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+private fun SettingsDraft.updateProfile(
+    name: String,
+    update: (EndpointProfileDraft) -> EndpointProfileDraft,
+): SettingsDraft = copy(profiles = profiles.map { if (it.name == name) update(it) else it })
+
+private fun SettingsDraft.removeProfile(name: String): SettingsDraft {
+    val remaining = profiles.filterNot { it.name == name }
+    return copy(
+        profiles = remaining,
+        activeProfile = if (activeProfile == name) remaining.first().name else activeProfile,
+    )
+}
+
+private val ConfigMutationOutcome.persisted: Boolean
+    get() = this is ConfigMutationOutcome.Saved || this is ConfigMutationOutcome.SavedFollowUpPending
+
+private fun ConfigMutationOutcome.safeMessage(): String =
+    when (this) {
+        ConfigMutationOutcome.Saved -> "Configuration saved and applied."
+        is ConfigMutationOutcome.SavedFollowUpPending -> "Configuration saved, but follow-up is pending: $code."
+        is ConfigMutationOutcome.Rejected -> errors.display()
+        ConfigMutationOutcome.SaveFailed -> "Configuration could not be saved."
+    }
+
+private fun List<com.nfaalerts.collector.config.ConfigValidationError>.display(): String =
+    joinToString("\n") { "${it.path}: ${it.code} — ${it.safeMessage}" }
+
+private fun String.rfc6901(): String = replace("~", "~0").replace("/", "~1")
 
 private fun GuidedSetupStep.actionLabel(): String =
     when (this) {

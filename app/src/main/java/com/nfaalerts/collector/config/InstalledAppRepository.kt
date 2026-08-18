@@ -2,8 +2,10 @@ package com.nfaalerts.collector.config
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.drawable.Drawable
 import android.os.Build
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -11,7 +13,7 @@ data class InstalledApp(
     val packageName: String,
     val label: String,
     val flags: Int,
-    val icon: Drawable? = null,
+    val icon: ImageBitmap? = null,
 ) {
     val isSystem: Boolean = InstalledAppClassifier.isSystem(flags)
 }
@@ -49,7 +51,10 @@ class InstalledAppRepository(
                         packageName = info.packageName,
                         label = packageManager.getApplicationLabel(info).toString(),
                         flags = info.flags,
-                        icon = runCatching { info.loadIcon(packageManager) }.getOrNull(),
+                        icon =
+                            runCatching {
+                                info.loadIcon(packageManager).toBitmap(width = 48, height = 48).asImageBitmap()
+                            }.getOrNull(),
                     )
                 }
         }

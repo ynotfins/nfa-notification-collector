@@ -6,13 +6,14 @@ import com.nfaalerts.collector.capture.ListenerStatus
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.CollectorConfigDocument
 import com.nfaalerts.collector.config.ConfigLoadResult
-import com.nfaalerts.collector.config.ConfigSaveResult
 import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
+import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.data.CollectorStatusAggregate
 import com.nfaalerts.collector.security.BearerLoadState
+import com.nfaalerts.collector.ui.settings.SettingsDraft
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,8 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 class AppContainerUiRepository internal constructor(
     private val container: AppContainer,
@@ -41,6 +44,19 @@ class AppContainerUiRepository internal constructor(
     private val configState = MutableStateFlow<UiConfigState?>(null)
     private val bearerState = MutableStateFlow<BearerUiState?>(null)
     private val verifiedKey = MutableStateFlow<LiveVerificationFingerprint?>(null)
+    private val configFeedback = MutableStateFlow<String?>(null)
+    private val configMutationCoordinator =
+        ConfigMutationCoordinator(
+            invalidateVerification = { verifiedKey.value = null },
+            reloadSources = {
+                container.sourceSelections.load()
+                if (container.sourceSelections.loadState.value !is SelectionLoadState.Ready) {
+                    error("SOURCE_RELOAD_PENDING")
+                }
+            },
+            reloadUi = ::refreshStoredStateNow,
+            requeue = container::onRelevantConfigurationChanged,
+        )
     private val tokenSaveCoordinator =
         TokenSaveCoordinator(
             saveBearer = container.bearerStore::save,
@@ -170,22 +186,26 @@ class AppContainerUiRepository internal constructor(
 
     private fun refreshStoredState() {
         scope.launch(Dispatchers.IO) {
-            configState.value =
-                when (val loaded = container.configStore.load()) {
-                    is ConfigLoadResult.Loaded -> {
-                        loaded.document.toUiConfigState(valid = true)
-                    }
-
-                    ConfigLoadResult.Missing -> {
-                        CollectorConfigCodec().defaultDocument().toUiConfigState(valid = true)
-                    }
-
-                    is ConfigLoadResult.Invalid, ConfigLoadResult.IoFailure -> {
-                        CollectorConfigCodec().defaultDocument().toUiConfigState(valid = false)
-                    }
-                }
-            refreshBearerState()
+            refreshStoredStateNow()
         }
+    }
+
+    private suspend fun refreshStoredStateNow() {
+        configState.value =
+            when (val loaded = container.configStore.load()) {
+                is ConfigLoadResult.Loaded -> {
+                    loaded.document.toUiConfigState(valid = true)
+                }
+
+                ConfigLoadResult.Missing -> {
+                    CollectorConfigCodec().defaultDocument().toUiConfigState(valid = true)
+                }
+
+                is ConfigLoadResult.Invalid, ConfigLoadResult.IoFailure -> {
+                    CollectorConfigCodec().defaultDocument().toUiConfigState(valid = false)
+                }
+            }
+        refreshBearerState()
     }
 
     private suspend fun refreshBearerState(requirePresent: Boolean = false) {
@@ -239,53 +259,128 @@ class AppContainerUiRepository internal constructor(
 
     override suspend fun saveToken(value: CharArray): TokenSaveOutcome = tokenSaveCoordinator.save(value)
 
-    override suspend fun saveConfig(payload: String): List<ConfigValidationError> =
-        container.configStore
-            .savePayload(payload.encodeToByteArray())
-            .also { result ->
-                if (result is ConfigSaveResult.Saved) {
-                    verifiedKey.value = null
-                    container.onRelevantConfigurationChanged()
-                    refreshStoredState()
-                }
-            }.errors()
+    override suspend fun saveConfig(payload: String): List<ConfigValidationError> = saveConfigOutcome(payload).errors()
+
+    override suspend fun saveConfigOutcome(payload: String): ConfigMutationOutcome =
+        configMutationCoordinator.save {
+            val bytes = withContext(Dispatchers.Default) { payload.encodeToByteArray() }
+            try {
+                container.configStore.savePayload(bytes)
+            } finally {
+                bytes.fill(0)
+            }
+        }
+
+    override suspend fun validateConfig(payload: String): List<ConfigValidationError> =
+        withContext(Dispatchers.Default) {
+            when (val decoded = CollectorConfigCodec().decode(payload.encodeToByteArray())) {
+                is com.nfaalerts.collector.config.ConfigDecodeResult.Valid -> emptyList()
+                is com.nfaalerts.collector.config.ConfigDecodeResult.Invalid -> decoded.errors
+            }
+        }
+
+    override suspend fun settingsDraft(): SettingsDraft =
+        withContext(Dispatchers.Default) {
+            SettingsDraft.from(loadConfigDocumentForUi())
+        }
+
+    override suspend fun defaultSettingsDraft(): SettingsDraft =
+        withContext(Dispatchers.Default) { SettingsDraft.from(CollectorConfigCodec().defaultDocument()) }
+
+    override suspend fun saveSettings(draft: SettingsDraft): ConfigMutationOutcome =
+        configMutationCoordinator.save {
+            val payload = withContext(Dispatchers.Default) { draft.encodedPayload() }
+            try {
+                container.configStore.savePayload(payload)
+            } finally {
+                payload.fill(0)
+            }
+        }
 
     override suspend fun exportConfig(): ByteArray = container.configStore.exportPayload()
 
     override suspend fun importConfig(payload: ByteArray): List<ConfigValidationError> =
-        container.configStore
-            .importPayload(payload)
-            .also { result ->
-                if (result is ConfigSaveResult.Saved) {
-                    verifiedKey.value = null
-                    container.onRelevantConfigurationChanged()
-                    refreshStoredState()
-                }
-            }.errors()
+        configMutationCoordinator
+            .save { container.configStore.importPayload(payload) }
+            .also { configFeedback.value = it.importMessage() }
+            .errors()
 
     override suspend fun formattedConfig(): String =
         withContext(Dispatchers.Default) {
-            container.exportConfigForUi().decodeToString()
+            pretty(loadConfigDocumentForUi().root)
         }
+
+    override suspend fun defaultFormattedConfig(): String =
+        withContext(Dispatchers.Default) { pretty(CollectorConfigCodec().defaultDocument().root) }
+
+    override fun configurationFeedback(): StateFlow<String?> = configFeedback
+
+    fun reportImportOversize() {
+        configFeedback.value = "/: CONFIG_PAYLOAD_LIMIT — Configuration exceeds 1 MiB."
+    }
+
+    fun reportImportFailure() {
+        configFeedback.value = "Configuration import failed."
+    }
+
+    fun reportExportSucceeded() {
+        configFeedback.value = "Configuration export completed."
+    }
+
+    fun reportExportFailed() {
+        configFeedback.value = "Configuration export failed."
+    }
 
     override suspend fun retry(eventId: String): Boolean = container.retryDeliveryFromUi(eventId)
 
-    private fun ConfigSaveResult.errors(): List<ConfigValidationError> =
+    private fun ConfigMutationOutcome.errors(): List<ConfigValidationError> =
         when (this) {
-            is ConfigSaveResult.Rejected -> {
+            is ConfigMutationOutcome.Rejected -> {
                 errors
             }
 
-            ConfigSaveResult.IoFailure -> {
-                listOf(
-                    ConfigValidationError("/", "CONFIG_IO_FAILURE", "Configuration could not be saved."),
-                )
+            ConfigMutationOutcome.SaveFailed -> {
+                listOf(ConfigValidationError("/", "CONFIG_IO_FAILURE", "Configuration could not be saved."))
             }
 
-            is ConfigSaveResult.Saved -> {
+            ConfigMutationOutcome.Saved,
+            is ConfigMutationOutcome.SavedFollowUpPending,
+            -> {
                 emptyList()
             }
         }
+
+    private fun ConfigMutationOutcome.importMessage(): String =
+        when (this) {
+            ConfigMutationOutcome.Saved -> {
+                "Configuration import completed."
+            }
+
+            is ConfigMutationOutcome.SavedFollowUpPending -> {
+                "Configuration imported, but follow-up is pending: $code."
+            }
+
+            is ConfigMutationOutcome.Rejected -> {
+                errors.joinToString("\n") { it.display() }
+            }
+
+            ConfigMutationOutcome.SaveFailed -> {
+                "Configuration import failed."
+            }
+        }
+
+    private suspend fun loadConfigDocumentForUi(): CollectorConfigDocument =
+        when (val loaded = container.configStore.load()) {
+            is ConfigLoadResult.Loaded -> loaded.document
+            ConfigLoadResult.Missing -> CollectorConfigCodec().defaultDocument()
+            is ConfigLoadResult.Invalid -> error(loaded.errors.first().code)
+            ConfigLoadResult.IoFailure -> error("CONFIG_IO_FAILURE")
+        }
+
+    private fun pretty(root: JsonObject): String =
+        Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), root)
+
+    private fun ConfigValidationError.display(): String = "$path: $code — $safeMessage"
 
     private fun ConnectivityState.label() =
         when (this) {

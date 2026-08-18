@@ -6,11 +6,15 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.config.ConfigValidationError
@@ -197,6 +201,80 @@ class CollectorHomeScreenInstrumentedTest {
             .onNodeWithText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry.")
             .assertIsDisplayed()
     }
+
+    @Test
+    fun settingsPreloadsFormsAndJsonWithValidationAndPlatformLinks() {
+        var accessOpened = false
+        var batteryOpened = false
+        val repository = FakeCollectorUiRepository()
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = { accessOpened = true },
+                openBatterySettings = { batteryOpened = true },
+            )
+        }
+
+        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithText("Endpoint profiles").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("device-id-form"))
+        composeRule.onNodeWithTag("device-id-form").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Validate only"))
+        composeRule.onNodeWithText("Validate only").performClick()
+        composeRule.onNodeWithText("Configuration is valid.").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Open notification access settings"))
+        composeRule.onNodeWithText("Open notification access settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Open battery settings"))
+        composeRule.onNodeWithText("Open battery settings").performClick()
+        composeRule.runOnIdle {
+            assertTrue(accessOpened)
+            assertTrue(batteryOpened)
+        }
+    }
+
+    @Test
+    fun resetUsesApprovedDefaultsInsteadOfReloadingCurrentJson() {
+        val repository = FakeCollectorUiRepository()
+        repository.formatted =
+            """{"configVersion":1,"deviceId":"changed-device","activeEndpointProfile":"tailscale","endpointProfiles":{"tailscale":{"baseUrl":"https://example.invalid","ingestPath":"/v1/ingest/alerts"}},"sources":[],"delivery":{"connectTimeoutMs":15000,"readTimeoutMs":30000,"initialBackoffMs":30000,"maxBackoffMs":21600000},"retention":{"sentDays":90,"maxSentRows":10000},"diagnostics":{"retentionDays":14,"maxRows":2000}}"""
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Reset to approved defaults"))
+        composeRule.onNodeWithText("Reset to approved defaults").performClick()
+
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("device-id-form"))
+        composeRule.onNodeWithTag("device-id-form").assertTextContains("nfa-primary-phone")
+    }
+
+    @Test
+    fun settingsSurfacesImportAndExportResultFeedback() {
+        val repository = FakeCollectorUiRepository()
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+        composeRule.onNodeWithText("Settings").performClick()
+
+        repository.feedback.value = "/: CONFIG_PAYLOAD_LIMIT — Configuration exceeds 1 MiB."
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("/: CONFIG_PAYLOAD_LIMIT — Configuration exceeds 1 MiB."))
+        composeRule.onNodeWithText("/: CONFIG_PAYLOAD_LIMIT — Configuration exceeds 1 MiB.").assertIsDisplayed()
+
+        repository.feedback.value = "Configuration export failed."
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Configuration export failed."))
+        composeRule.onNodeWithText("Configuration export failed.").assertIsDisplayed()
+    }
 }
 
 private class FakeCollectorUiRepository(
@@ -207,6 +285,13 @@ private class FakeCollectorUiRepository(
     override val state: StateFlow<CollectorUiSnapshot> = mutableState
     var verifyCalls = 0
     var tokenOutcome = TokenSaveOutcome.Saved
+    var formatted =
+        com.nfaalerts.collector.config
+            .CollectorConfigCodec()
+            .defaultDocument()
+            .root
+            .toString()
+    val feedback = MutableStateFlow<String?>(null)
 
     override fun refreshPlatformState() = Unit
 
@@ -235,7 +320,9 @@ private class FakeCollectorUiRepository(
 
     override suspend fun importConfig(payload: ByteArray): List<ConfigValidationError> = emptyList()
 
-    override suspend fun formattedConfig(): String = "{}"
+    override suspend fun formattedConfig(): String = formatted
+
+    override fun configurationFeedback(): StateFlow<String?> = feedback
 
     override suspend fun retry(eventId: String): Boolean = false
 }
