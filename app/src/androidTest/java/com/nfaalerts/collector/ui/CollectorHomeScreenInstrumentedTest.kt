@@ -87,6 +87,8 @@ private class FakeCollectorUiRepository : CollectorUiRepository {
 
     override suspend fun deliveryRows(): List<DeliveryUiRow> = emptyList()
 
+    override suspend fun deliveryEnvelope(eventId: String): String? = null
+
     override suspend fun saveToken(value: CharArray): Boolean {
         value.fill('\u0000')
         return true
@@ -97,6 +99,8 @@ private class FakeCollectorUiRepository : CollectorUiRepository {
     override suspend fun exportConfig(): ByteArray = ByteArray(0)
 
     override suspend fun importConfig(payload: ByteArray): List<ConfigValidationError> = emptyList()
+
+    override suspend fun formattedConfig(): String = "{}"
 
     override suspend fun retry(eventId: String): Boolean = false
 }

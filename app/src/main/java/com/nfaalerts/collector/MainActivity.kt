@@ -10,7 +10,11 @@ import androidx.lifecycle.lifecycleScope
 import com.nfaalerts.collector.ui.AppContainerUiRepository
 import com.nfaalerts.collector.ui.CollectorHomeScreen
 import com.nfaalerts.collector.ui.theme.NfaCollectorTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
     private lateinit var uiRepository: AppContainerUiRepository
@@ -18,14 +22,23 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri ?: return@registerForActivityResult
             lifecycleScope.launch {
-                contentResolver.openInputStream(uri)?.use { uiRepository.importConfig(it.readBytes()) }
+                withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        val payload = input.readBounded(MAX_CONFIG_BYTES + 1)
+                        if (payload.size <= MAX_CONFIG_BYTES) uiRepository.importConfig(payload)
+                    }
+                }
             }
         }
     private val exportConfig =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             uri ?: return@registerForActivityResult
             lifecycleScope.launch {
-                contentResolver.openOutputStream(uri)?.use { it.write(uiRepository.exportConfig()) }
+                withContext(Dispatchers.IO) {
+                    val payload = uiRepository.exportConfig()
+                    require(payload.size <= MAX_CONFIG_BYTES) { "CONFIG_PAYLOAD_LIMIT" }
+                    contentResolver.openOutputStream(uri)?.use { it.write(payload) }
+                }
             }
         }
 
@@ -46,4 +59,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private companion object {
+        const val MAX_CONFIG_BYTES = 1_048_576
+    }
+}
+
+private fun InputStream.readBounded(limit: Int): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(8_192)
+    while (output.size() < limit) {
+        val read = read(buffer, 0, minOf(buffer.size, limit - output.size()))
+        if (read < 0) break
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
 }

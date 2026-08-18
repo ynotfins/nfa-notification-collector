@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,8 +34,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.nfaalerts.collector.capture.RawTextField
+import com.nfaalerts.collector.config.SourceSelection
+import com.nfaalerts.collector.ui.sources.SourcePickerScreen
 import kotlinx.coroutines.launch
 
 @Composable
@@ -138,6 +144,9 @@ private fun SourcesScreen(
     modifier: Modifier,
 ) {
     val sources by produceState(emptyList(), repository) { value = repository.selectedSources() }
+    val pickerAccess = repository as? SourcePickerUiAccess
+    val apps by produceState(emptyList(), pickerAccess) { value = pickerAccess?.sourcePickerApps() ?: emptyList() }
+    var editing by remember { mutableStateOf<SourceSelection?>(null) }
     Column(modifier.padding(16.dp)) {
         Text("Sources (${snapshot.selectedCount} / 10)", modifier = Modifier.semantics { heading() })
         Text("Non-BNN sources are captured locally as BLOCKED_CONTRACT until the gateway contract is approved.")
@@ -147,9 +156,59 @@ private fun SourcesScreen(
                     "${source.appLabel} (${source.packageName}) — ${if (source.enabled) "Enabled" else "Disabled"}; ${source.sourceId}",
                 )
                 Text("Raw priority: ${source.rawTextOrder.joinToString()}")
+                TextButton(onClick = { editing = source }) { Text("Edit source") }
             }
         }
+        if (pickerAccess != null) {
+            SourcePickerScreen(
+                apps = apps,
+                repository = pickerAccess.sourceSelectionRepository,
+                sourceIdForPackage = pickerAccess::sourceIdForPackage,
+            )
+        }
     }
+    editing?.let { source -> SourceEditorDialog(source, repository as? SourcePickerUiAccess) { editing = null } }
+}
+
+@Composable
+private fun SourceEditorDialog(
+    source: SourceSelection,
+    access: SourcePickerUiAccess?,
+    dismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var enabled by remember { mutableStateOf(source.enabled) }
+    var sourceId by remember { mutableStateOf(source.sourceId) }
+    var bnnConfirmed by remember { mutableStateOf(source.bnnMappingConfirmed) }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("Edit ${source.appLabel}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row {
+                    Text("Enabled")
+                    Switch(enabled, { enabled = it })
+                }
+                OutlinedTextField(sourceId, { sourceId = it }, label = { Text("Source ID") })
+                if (sourceId == "bnn") {
+                    Text("Confirm this exact app is BNN before it may use the BNN contract.")
+                    Switch(bnnConfirmed, { bnnConfirmed = it })
+                }
+                Text("Raw priority: ${RawTextField.DEFAULT_ORDER.joinToString()}")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                scope.launch {
+                    access?.sourceSelectionRepository?.upsert(
+                        source.copy(enabled = enabled, sourceId = sourceId, bnnMappingConfirmed = bnnConfirmed),
+                    )
+                    dismiss()
+                }
+            }) { Text("Save source") }
+        },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -158,7 +217,8 @@ private fun DeliveryScreen(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var privacyWarning by rememberSaveable { mutableStateOf(false) }
+    var privacyEventId by remember { mutableStateOf<String?>(null) }
+    var envelope by remember { mutableStateOf<String?>(null) }
     val rows by produceState(emptyList(), repository) { value = repository.deliveryRows() }
     Column(modifier.padding(16.dp)) {
         Text("Recent delivery", modifier = Modifier.semantics { heading() })
@@ -170,10 +230,13 @@ private fun DeliveryScreen(
                     Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
                     Text(row.redactedPreview)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { privacyWarning = true }, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+                        TextButton(
+                            onClick = { privacyEventId = row.eventId },
+                            modifier = Modifier.sizeIn(minHeight = 48.dp),
+                        ) {
                             Text("View local envelope")
                         }
-                        if (row.state in setOf("RETRY_WAIT", "PAUSED_AUTH", "QUARANTINED")) {
+                        if (row.state == "RETRY_WAIT") {
                             TextButton(
                                 onClick = { scope.launch { repository.retry(row.eventId) } },
                                 modifier = Modifier.sizeIn(minHeight = 48.dp),
@@ -184,16 +247,32 @@ private fun DeliveryScreen(
             }
         }
     }
-    if (privacyWarning) {
+    if (privacyEventId != null) {
         AlertDialog(
-            onDismissRequest = { privacyWarning = false },
+            onDismissRequest = { privacyEventId = null },
             title = { Text("Private local envelope") },
             text = {
                 Text(
                     "Full notification content can be private. This view is read-only and cannot be copied to the clipboard.",
                 )
             },
-            confirmButton = { TextButton(onClick = { privacyWarning = false }) { Text("I understand") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    val eventId = privacyEventId ?: return@TextButton
+                    scope.launch {
+                        envelope = repository.deliveryEnvelope(eventId)
+                        privacyEventId = null
+                    }
+                }) { Text("I understand") }
+            },
+        )
+    }
+    envelope?.let { value ->
+        AlertDialog(
+            onDismissRequest = { envelope = null },
+            title = { Text("Read-only local envelope") },
+            text = { Text(value) },
+            confirmButton = { TextButton(onClick = { envelope = null }) { Text("Close") } },
         )
     }
 }
@@ -208,7 +287,7 @@ private fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var tokenEntry by rememberSaveable { mutableStateOf(false) }
-    var editor by rememberSaveable { mutableStateOf("") }
+    var editor by remember { mutableStateOf("") }
     var errors by rememberSaveable { mutableStateOf("") }
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Connection settings", modifier = Modifier.semantics { heading() })
@@ -216,6 +295,7 @@ private fun SettingsScreen(
         Text("Device ID: ${snapshot.deviceId}")
         Button(onClick = { tokenEntry = true }, modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Enter token") }
         Text("Retry and retention are stored in the non-secret configuration.")
+        TextButton(onClick = { scope.launch { editor = repository.formattedConfig() } }) { Text("Load current JSON") }
         OutlinedTextField(
             value = editor,
             onValueChange = { editor = it },
@@ -237,6 +317,12 @@ private fun SettingsScreen(
             },
             modifier = Modifier.sizeIn(minHeight = 48.dp),
         ) { Text("Save / Apply") }
+        TextButton(onClick = {
+            scope.launch {
+                editor = repository.formattedConfig()
+                errors = ""
+            }
+        }) { Text("Reset") }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = requestImport,
@@ -259,6 +345,7 @@ private fun TokenEntryDialog(
 ) {
     val scope = rememberCoroutineScope()
     var token by remember { mutableStateOf("") }
+    var tokenError by remember { mutableStateOf("") }
     SecureWindowEffect()
     AlertDialog(
         onDismissRequest = dismiss,
@@ -269,16 +356,21 @@ private fun TokenEntryDialog(
                 onValueChange = { token = it },
                 label = { Text("Bearer token") },
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                supportingText = { if (tokenError.isNotBlank()) Text(tokenError) },
             )
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     val transient = token.toCharArray()
-                    token = ""
                     scope.launch {
-                        repository.saveToken(transient)
-                        dismiss()
+                        if (repository.saveToken(transient)) {
+                            token = ""
+                            dismiss()
+                        } else {
+                            tokenError = "Token could not be saved."
+                        }
                     }
                 },
             ) { Text("Save token") }

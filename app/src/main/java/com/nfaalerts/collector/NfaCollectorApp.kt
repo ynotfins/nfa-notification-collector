@@ -124,11 +124,16 @@ class AppContainer(
 
     internal suspend fun recentDeliveryInspection() = database.captureReadDao().recentDeliveryInspection(100)
 
+    internal suspend fun deliveryEnvelopeForUi(eventId: String): String? =
+        database.captureReadDao().capture(eventId)?.envelopeJson
+
     internal suspend fun retryDeliveryFromUi(eventId: String): Boolean {
         val changed = database.deliveryDao().retryFromOperator(eventId, clock()) == 1
         if (changed) deliveryScheduler.ensureScheduled(clock())
         return changed
     }
+
+    internal suspend fun exportConfigForUi(): ByteArray = configStore.exportPayload()
 
     suspend fun recoverExpiredSending(): Int = database.deliveryDao().recoverStaleSending(clock())
 

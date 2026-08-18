@@ -233,7 +233,7 @@ abstract class DeliveryDao {
         UPDATE delivery_outbox
         SET state = 'PENDING', nextAttemptAtEpochMillis = NULL, leaseOwner = NULL,
             leaseExpiresAtEpochMillis = NULL, updatedAtEpochMillis = :nowEpochMillis
-        WHERE eventId = :eventId AND state IN ('RETRY_WAIT', 'PAUSED_AUTH', 'QUARANTINED')
+        WHERE eventId = :eventId AND state = 'RETRY_WAIT'
         """,
     )
     abstract suspend fun retryFromOperator(

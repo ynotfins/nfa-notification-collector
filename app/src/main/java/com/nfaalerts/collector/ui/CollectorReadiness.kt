@@ -1,5 +1,7 @@
 package com.nfaalerts.collector.ui
 
+import com.nfaalerts.collector.data.DeliveryState
+
 enum class CollectorReadinessState {
     Ready,
     SetupRequired,
@@ -59,3 +61,7 @@ data class CollectorUiSnapshot(
     val networkState: String = "Unknown",
     val batteryState: String = "Unknown",
 )
+
+object DeliveryRetryEligibility {
+    fun allows(state: DeliveryState): Boolean = state == DeliveryState.RETRY_WAIT
+}

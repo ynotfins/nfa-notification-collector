@@ -11,12 +11,18 @@ import com.nfaalerts.collector.config.ConfigSaveResult
 import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.config.SourceSelection
+import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.security.BearerLoadState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class AppContainerUiRepository(
     private val context: Context,
     private val container: AppContainer,
-) : CollectorUiRepository {
+) : CollectorUiRepository,
+    SourcePickerUiAccess {
+    override val sourceSelectionRepository: SourceSelectionRepository = container.sourceSelections
+
     override suspend fun snapshot(): CollectorUiSnapshot {
         val document =
             when (val loaded = container.configStore.load()) {
@@ -75,6 +81,16 @@ class AppContainerUiRepository(
 
     override suspend fun installedApps(): List<InstalledApp> = container.installedApps.installedApps()
 
+    override suspend fun sourcePickerApps(): List<InstalledApp> = installedApps()
+
+    override fun sourceIdForPackage(packageName: String): String =
+        container.sourceSelections
+            .snapshot()
+            .selections
+            .firstOrNull { it.packageName == packageName }
+            ?.sourceId
+            ?: "local"
+
     override suspend fun selectedSources(): List<SourceSelection> = container.sourceSelections.snapshot().selections
 
     override suspend fun deliveryRows(): List<DeliveryUiRow> =
@@ -92,16 +108,34 @@ class AppContainerUiRepository(
             )
         }
 
+    override suspend fun deliveryEnvelope(eventId: String): String? = container.deliveryEnvelopeForUi(eventId)
+
     override suspend fun saveToken(value: CharArray): Boolean =
-        runCatching { container.bearerStore.save(value) }.isSuccess
+        runCatching {
+            container.bearerStore.save(value)
+            container.onRelevantConfigurationChanged()
+        }.isSuccess
 
     override suspend fun saveConfig(payload: String): List<ConfigValidationError> =
-        container.configStore.savePayload(payload.encodeToByteArray()).errors()
+        container.configStore
+            .savePayload(payload.encodeToByteArray())
+            .also { result ->
+                if (result is ConfigSaveResult.Saved) container.onRelevantConfigurationChanged()
+            }.errors()
 
     override suspend fun exportConfig(): ByteArray = container.configStore.exportPayload()
 
     override suspend fun importConfig(payload: ByteArray): List<ConfigValidationError> =
-        container.configStore.importPayload(payload).errors()
+        container.configStore
+            .importPayload(payload)
+            .also { result ->
+                if (result is ConfigSaveResult.Saved) container.onRelevantConfigurationChanged()
+            }.errors()
+
+    override suspend fun formattedConfig(): String =
+        withContext(Dispatchers.Default) {
+            container.exportConfigForUi().decodeToString()
+        }
 
     override suspend fun retry(eventId: String): Boolean = container.retryDeliveryFromUi(eventId)
 
