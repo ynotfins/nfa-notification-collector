@@ -4,9 +4,11 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.nfaalerts.collector.MainActivity
@@ -143,10 +145,33 @@ class CollectorHomeScreenInstrumentedTest {
 
         composeRule.onNodeWithText("Ready — required setup and local verification are complete").assertIsDisplayed()
         composeRule
-            .onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collector ready"))
+            .onNodeWithTag("collector-ready-container")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collector ready"))
             .assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Ready status icon").assertIsDisplayed()
         assertTrue(repository.verifyCalls == 1)
+    }
+
+    @Test
+    fun unknownNotificationAccessIsNeverPresentedAsRequired() {
+        val repository =
+            FakeCollectorUiRepository(
+                initial =
+                    defaultSnapshot().copy(
+                        readiness = CollectorReadiness(false, true, true, true, 1),
+                        notificationAccessState = NotificationAccessState.Unknown,
+                    ),
+            )
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Notification access: Unknown").assertIsDisplayed()
+        composeRule.onNodeWithText("Notification access could not be checked safely.").assertIsDisplayed()
     }
 }
 

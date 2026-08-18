@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -155,7 +156,11 @@ private fun StatusScreen(
             Surface(
                 color = Color(0xFFD8F3DC),
                 contentColor = Color(0xFF176B2C),
-                modifier = Modifier.fillMaxWidth().semantics { stateDescription = "Collector ready" },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("collector-ready-container")
+                        .semantics { stateDescription = "Collector ready" },
             ) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("✓", modifier = Modifier.semantics { contentDescription = "Ready status icon" })
@@ -179,7 +184,11 @@ private fun StatusScreen(
             }
             Text(snapshot.verificationMessage)
         }
-        Text("Notification access: ${if (snapshot.readiness.notificationAccessGranted) "Granted" else "Required"}")
+        val access = snapshot.notificationAccessState.presentation()
+        Text("Notification access: ${access.label}")
+        if (snapshot.notificationAccessState == NotificationAccessState.Unknown) {
+            Text(access.safeExplanation)
+        }
         Text("Battery reliability: ${snapshot.batteryState}")
         Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
             Text("Open battery settings")

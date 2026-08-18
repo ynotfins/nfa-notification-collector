@@ -58,6 +58,26 @@ class PlatformStatusInstrumentedTest {
             assertEquals(1, batteryRegistrations)
             assertEquals(1, batteryUnregistrations)
         }
+
+    @Test
+    fun callbackRegistrationCompletesBeforeFinalCurrentStateRead() =
+        runBlocking {
+            val events = mutableListOf<String>()
+            val flow =
+                registeredStatusFlow(
+                    current = {
+                        events += "read"
+                        ConnectivityState.Connected
+                    },
+                    unknown = ConnectivityState.Unknown,
+                ) {
+                    events += "register"
+                    { events += "unregister" }
+                }
+
+            assertEquals(ConnectivityState.Connected, flow.first())
+            assertEquals(listOf("register", "read", "unregister"), events)
+        }
 }
 
 private class RecordingPlatformSource : PlatformStatusSource {

@@ -91,19 +91,13 @@ data class CollectorUiSnapshot(
     val verificationComplete: Boolean = false,
     val verificationMessage: String = "Run the safe local verification check.",
     val loading: Boolean = false,
+    val notificationAccessState: NotificationAccessState = NotificationAccessState.Unknown,
+    val connectivityState: ConnectivityState = ConnectivityState.Unknown,
+    internal val liveVerificationFingerprint: LiveVerificationFingerprint? = null,
 ) {
     val guidedStep: GuidedSetupStep
         get() = GuidedSetup.next(readiness, verificationComplete)
 }
-
-internal data class LocalVerificationKey(
-    val endpoint: String,
-    val deviceId: String,
-    val notificationAccessGranted: Boolean,
-    val bearerSaved: Boolean,
-    val enabledSourceCount: Int,
-    val connectivityState: String,
-)
 
 object DeliveryRetryEligibility {
     fun allows(state: DeliveryState): Boolean = state == DeliveryState.RETRY_WAIT

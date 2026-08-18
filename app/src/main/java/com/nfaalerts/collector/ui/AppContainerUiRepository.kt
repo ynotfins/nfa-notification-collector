@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,21 +39,24 @@ class AppContainerUiRepository internal constructor(
     override val sourceSelectionRepository: SourceSelectionRepository = container.sourceSelections
     private val platform = ResumablePlatformState(platformSource)
     private val configState = MutableStateFlow<UiConfigState?>(null)
-    private val bearerPresent = MutableStateFlow<Boolean?>(null)
-    private val verifiedKey = MutableStateFlow<LocalVerificationKey?>(null)
+    private val bearerState = MutableStateFlow<BearerUiState?>(null)
+    private val verifiedKey = MutableStateFlow<LiveVerificationFingerprint?>(null)
+    internal val platformRefreshCount: Long
+        get() = platform.refreshCount
+    internal val platformSourceType: String
+        get() = platform.sourceType
     private val coreState =
         combine(
             container.collectorStatus(),
             container.listenerStatus.state,
             container.sourceSelections.selections,
             configState,
-            bearerPresent,
+            bearerState,
         ) { aggregate, listener, selections, config, bearer ->
             CoreUiState(
                 aggregate,
                 listener,
-                selections.selections.count { it.enabled },
-                selections.selections.size,
+                selections.selections,
                 config,
                 bearer,
             )
@@ -68,34 +72,43 @@ class AppContainerUiRepository internal constructor(
         ) { core, access, connectivity, battery, verified ->
             val config = core.config
             val document = config?.document ?: CollectorConfigCodec().defaultDocument()
+            val enabledSourceCount = core.selections.count(SourceSelection::enabled)
             val readiness =
                 CollectorReadiness(
                     notificationAccessGranted = access == NotificationAccessState.Granted,
                     endpointIsValid = config?.valid == true,
-                    bearerSaved = core.bearerPresent == true,
+                    bearerSaved = core.bearer?.present == true,
                     deviceIdIsValid = config?.valid == true && document.config.deviceId.isNotBlank(),
-                    enabledSourceCount = core.enabledSourceCount,
+                    enabledSourceCount = enabledSourceCount,
                 )
             val facts = CollectorStatusFacts.from(core.aggregate)
             val networkLabel = connectivity.label()
             val currentKey =
-                LocalVerificationKey(
-                    endpoint = document.config.activeEndpoint.baseUrl,
-                    deviceId = document.config.deviceId,
-                    notificationAccessGranted = readiness.notificationAccessGranted,
-                    bearerSaved = readiness.bearerSaved,
-                    enabledSourceCount = readiness.enabledSourceCount,
-                    connectivityState = networkLabel,
-                )
+                if (config?.valid == true && core.bearer?.present == true && core.bearer.revisionFingerprint != null) {
+                    LiveVerificationFingerprint.create(
+                        canonicalConfigHash = config.revisionHash,
+                        activeProfileId = document.config.activeEndpointProfile,
+                        baseUrl = document.config.activeEndpoint.baseUrl,
+                        ingestPath = document.config.activeEndpoint.ingestPath,
+                        deviceId = document.config.deviceId,
+                        bearerRevisionFingerprint = core.bearer.revisionFingerprint,
+                        sources = core.selections,
+                        notificationAccess = access,
+                        connectivity = connectivity,
+                    )
+                } else {
+                    null
+                }
             val verificationComplete =
-                readiness.state == CollectorReadinessState.Ready &&
+                currentKey != null &&
+                    readiness.state == CollectorReadinessState.Ready &&
                     connectivity == ConnectivityState.Connected &&
                     verified == currentKey
             CollectorUiSnapshot(
                 readiness = readiness,
                 endpoint = document.config.activeEndpoint.baseUrl,
                 deviceId = document.config.deviceId,
-                selectedCount = core.selectedCount,
+                selectedCount = core.selections.size,
                 queueCount = facts.nonSentCount,
                 listenerState = if (core.listener.connected) "Connected" else "Disconnected",
                 lastCapture = facts.lastCaptureAtEpochMillis?.toString() ?: "Unknown",
@@ -108,7 +121,10 @@ class AppContainerUiRepository internal constructor(
                 serverReceivedAt = facts.lastServerReceivedAt ?: "Unknown",
                 verificationComplete = verificationComplete,
                 verificationMessage = verificationMessage(readiness, connectivity, verificationComplete),
-                loading = config == null || core.bearerPresent == null,
+                loading = config == null || core.bearer == null,
+                notificationAccessState = access,
+                connectivityState = connectivity,
+                liveVerificationFingerprint = currentKey,
             )
         }.stateIn(
             scope = scope,
@@ -118,6 +134,11 @@ class AppContainerUiRepository internal constructor(
 
     init {
         refreshStoredState()
+        scope.launch {
+            container.sourceSelections.selections
+                .drop(1)
+                .collect { refreshStoredState() }
+        }
     }
 
     override fun refreshPlatformState() {
@@ -130,12 +151,13 @@ class AppContainerUiRepository internal constructor(
         if (
             current.loading ||
             current.readiness.state != CollectorReadinessState.Ready ||
-            current.networkState != ConnectivityState.Connected.label()
+            current.connectivityState != ConnectivityState.Connected ||
+            current.liveVerificationFingerprint == null
         ) {
             verifiedKey.value = null
             return false
         }
-        verifiedKey.value = current.verificationKey()
+        verifiedKey.value = current.liveVerificationFingerprint
         return true
     }
 
@@ -144,24 +166,28 @@ class AppContainerUiRepository internal constructor(
             configState.value =
                 when (val loaded = container.configStore.load()) {
                     is ConfigLoadResult.Loaded -> {
-                        UiConfigState(loaded.document, true)
+                        loaded.document.toUiConfigState(valid = true)
                     }
 
                     ConfigLoadResult.Missing -> {
-                        UiConfigState(CollectorConfigCodec().defaultDocument(), true)
+                        CollectorConfigCodec().defaultDocument().toUiConfigState(valid = true)
                     }
 
                     is ConfigLoadResult.Invalid, ConfigLoadResult.IoFailure -> {
-                        UiConfigState(CollectorConfigCodec().defaultDocument(), false)
+                        CollectorConfigCodec().defaultDocument().toUiConfigState(valid = false)
                     }
                 }
-            bearerPresent.value =
+            bearerState.value =
                 container.bearerStore.load().let { state ->
                     if (state is BearerLoadState.Present) {
+                        val revision = state.revision
                         state.clear()
-                        true
+                        BearerUiState(present = true, revisionFingerprint = revision)
                     } else {
-                        false
+                        BearerUiState(
+                            present = false,
+                            revisionFingerprint = if (state == BearerLoadState.Missing) 0L else null,
+                        )
                     }
                 }
         }
@@ -202,13 +228,19 @@ class AppContainerUiRepository internal constructor(
         runCatching {
             container.bearerStore.save(value)
             container.onRelevantConfigurationChanged()
-        }.isSuccess.also { if (it) refreshStoredState() }
+        }.isSuccess.also {
+            if (it) {
+                verifiedKey.value = null
+                refreshStoredState()
+            }
+        }
 
     override suspend fun saveConfig(payload: String): List<ConfigValidationError> =
         container.configStore
             .savePayload(payload.encodeToByteArray())
             .also { result ->
                 if (result is ConfigSaveResult.Saved) {
+                    verifiedKey.value = null
                     container.onRelevantConfigurationChanged()
                     refreshStoredState()
                 }
@@ -221,6 +253,7 @@ class AppContainerUiRepository internal constructor(
             .importPayload(payload)
             .also { result ->
                 if (result is ConfigSaveResult.Saved) {
+                    verifiedKey.value = null
                     container.onRelevantConfigurationChanged()
                     refreshStoredState()
                 }
@@ -250,20 +283,10 @@ class AppContainerUiRepository internal constructor(
             }
         }
 
-    private fun CollectorUiSnapshot.verificationKey() =
-        LocalVerificationKey(
-            endpoint = endpoint,
-            deviceId = deviceId,
-            notificationAccessGranted = readiness.notificationAccessGranted,
-            bearerSaved = readiness.bearerSaved,
-            enabledSourceCount = readiness.enabledSourceCount,
-            connectivityState = networkState,
-        )
-
     private fun ConnectivityState.label() =
         when (this) {
-            ConnectivityState.Connected -> "Connected"
-            ConnectivityState.Disconnected -> "Disconnected"
+            ConnectivityState.Connected -> "Validated"
+            ConnectivityState.Disconnected -> "Not validated"
             ConnectivityState.Unknown -> "Unknown"
         }
 
@@ -280,11 +303,25 @@ class AppContainerUiRepository internal constructor(
         complete: Boolean,
     ): String =
         when {
-            complete -> "Local configuration and connectivity check passed."
-            readiness.state != CollectorReadinessState.Ready -> "Complete the required setup steps before verification."
-            connectivity == ConnectivityState.Disconnected -> "A network connection is required for verification."
-            connectivity == ConnectivityState.Unknown -> "Connectivity could not be checked."
-            else -> "Run the safe local verification check."
+            complete -> {
+                "Local configuration and connectivity check passed."
+            }
+
+            readiness.state != CollectorReadinessState.Ready -> {
+                "Complete the required setup steps before verification."
+            }
+
+            connectivity == ConnectivityState.Disconnected -> {
+                "A validated network connection is required for verification."
+            }
+
+            connectivity == ConnectivityState.Unknown -> {
+                "Connectivity could not be checked."
+            }
+
+            else -> {
+                "Run the safe local verification check."
+            }
         }
 
     private fun initialSnapshot() =
@@ -297,18 +334,32 @@ class AppContainerUiRepository internal constructor(
             listenerState = "Unknown",
             loading = true,
         )
+
+    private fun CollectorConfigDocument.toUiConfigState(valid: Boolean): UiConfigState {
+        val payload = CollectorConfigCodec().exportPayload(this)
+        return try {
+            UiConfigState(this, valid, canonicalConfigHash(payload))
+        } finally {
+            payload.fill(0)
+        }
+    }
 }
 
 private data class UiConfigState(
     val document: CollectorConfigDocument,
     val valid: Boolean,
+    val revisionHash: String,
+)
+
+private data class BearerUiState(
+    val present: Boolean,
+    val revisionFingerprint: Long?,
 )
 
 private data class CoreUiState(
     val aggregate: CollectorStatusAggregate,
     val listener: ListenerStatus,
-    val enabledSourceCount: Int,
-    val selectedCount: Int,
+    val selections: List<SourceSelection>,
     val config: UiConfigState?,
-    val bearerPresent: Boolean?,
+    val bearer: BearerUiState?,
 )

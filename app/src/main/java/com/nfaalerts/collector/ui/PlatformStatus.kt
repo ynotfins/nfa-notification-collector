@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.PowerManager
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
@@ -38,6 +37,53 @@ enum class BatteryOptimizationState {
     Unknown,
 }
 
+internal enum class PlatformRegistrationKind {
+    Connectivity,
+    Battery,
+}
+
+internal interface PlatformRegistrationObserver {
+    fun onRegistered(kind: PlatformRegistrationKind)
+
+    fun onUnregistered(kind: PlatformRegistrationKind)
+}
+
+private object NoOpPlatformRegistrationObserver : PlatformRegistrationObserver {
+    override fun onRegistered(kind: PlatformRegistrationKind) = Unit
+
+    override fun onUnregistered(kind: PlatformRegistrationKind) = Unit
+}
+
+data class NotificationAccessPresentation(
+    val label: String,
+    val safeExplanation: String,
+)
+
+fun NotificationAccessState.presentation(): NotificationAccessPresentation =
+    when (this) {
+        NotificationAccessState.Granted -> {
+            NotificationAccessPresentation("Granted", "Notification access is granted.")
+        }
+
+        NotificationAccessState.Required -> {
+            NotificationAccessPresentation("Required", "Notification access must be granted.")
+        }
+
+        NotificationAccessState.Unknown -> {
+            NotificationAccessPresentation("Unknown", "Notification access could not be checked safely.")
+        }
+    }
+
+internal fun connectivityState(
+    hasActiveNetwork: Boolean,
+    hasValidatedCapability: Boolean,
+): ConnectivityState =
+    if (hasActiveNetwork && hasValidatedCapability) {
+        ConnectivityState.Connected
+    } else {
+        ConnectivityState.Disconnected
+    }
+
 internal interface PlatformStatusSource {
     fun notificationAccess(): NotificationAccessState
 
@@ -56,10 +102,14 @@ internal class ResumablePlatformState(
     val connectivity: Flow<ConnectivityState> = source.connectivityChanges().distinctUntilChanged()
     val battery: Flow<BatteryOptimizationState> =
         merge(batteryRefresh, source.batteryChanges()).distinctUntilChanged()
+    val sourceType: String = source::class.java.name
+    var refreshCount: Long = 0
+        private set
 
     fun refresh() {
         notificationAccess.value = source.notificationAccess()
         batteryRefresh.value = source.batteryOptimization()
+        refreshCount += 1
     }
 }
 
@@ -76,7 +126,6 @@ internal fun <T> registeredStatusFlow(
                 trySend(unknown)
             }
         }
-        publish()
         val unregister =
             try {
                 register(::publish)
@@ -84,11 +133,13 @@ internal fun <T> registeredStatusFlow(
                 trySend(unknown)
                 null
             }
+        if (unregister != null) publish()
         awaitClose { unregister?.invoke() }
     }
 
 internal class AndroidPlatformStatusSource(
     context: Context,
+    private val registrationObserver: PlatformRegistrationObserver = NoOpPlatformRegistrationObserver,
 ) : PlatformStatusSource {
     private val applicationContext = context.applicationContext
     private val connectivityManager = applicationContext.getSystemService(ConnectivityManager::class.java)
@@ -134,12 +185,14 @@ internal class AndroidPlatformStatusSource(
                         networkCapabilities: NetworkCapabilities,
                     ) = publish()
                 }
-            connectivityManager.registerNetworkCallback(
-                NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
-                callback,
-            )
+            connectivityManager.registerDefaultNetworkCallback(callback)
+            registrationObserver.onRegistered(PlatformRegistrationKind.Connectivity)
             return@registeredStatusFlow {
-                runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+                try {
+                    connectivityManager.unregisterNetworkCallback(callback)
+                } finally {
+                    registrationObserver.onUnregistered(PlatformRegistrationKind.Connectivity)
+                }
             }
         }
 
@@ -167,20 +220,25 @@ internal class AndroidPlatformStatusSource(
                     IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
                 )
             }
+            registrationObserver.onRegistered(PlatformRegistrationKind.Battery)
             return@registeredStatusFlow {
-                runCatching { applicationContext.unregisterReceiver(receiver) }
+                try {
+                    applicationContext.unregisterReceiver(receiver)
+                } finally {
+                    registrationObserver.onUnregistered(PlatformRegistrationKind.Battery)
+                }
             }
         }
 
     private fun connectivityState(): ConnectivityState =
         try {
-            val active = connectivityManager.activeNetwork ?: return ConnectivityState.Disconnected
+            val active = connectivityManager.activeNetwork
             val capabilities = connectivityManager.getNetworkCapabilities(active)
-            if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) {
-                ConnectivityState.Connected
-            } else {
-                ConnectivityState.Disconnected
-            }
+            connectivityState(
+                hasActiveNetwork = active != null,
+                hasValidatedCapability =
+                    capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
+            )
         } catch (_: RuntimeException) {
             ConnectivityState.Unknown
         }
