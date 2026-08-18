@@ -34,6 +34,18 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+
+    lint {
+        abortOnError = true
+        warningsAsErrors = true
+        disable +=
+            setOf(
+                "AndroidGradlePluginVersion",
+                "GradleDependency",
+                "NewerVersionAvailable",
+                "OldTargetApi",
+            )
+    }
 }
 
 dependencies {
@@ -57,6 +69,7 @@ dependencies {
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(libs.androidx.room3.testing)
     androidTestImplementation(libs.compose.ui.test.junit4)
     testImplementation(libs.junit)

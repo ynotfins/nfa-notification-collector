@@ -49,6 +49,9 @@ class WireProjector(
                 return WireProjectionResult.Quarantined("WIRE_ENVELOPE_INVALID", capture.envelopeUtf8Bytes)
             }
         val metadata = buildMetadata(capture, envelope)
+        if (containsNul(metadata)) {
+            return WireProjectionResult.Quarantined("WIRE_METADATA_NUL", 1)
+        }
         val metadataBytes = metadata.toString().toByteArray(StandardCharsets.UTF_8).size
         if (metadataBytes > METADATA_LIMIT) {
             return WireProjectionResult.Quarantined("WIRE_METADATA_LIMIT", metadataBytes)
@@ -82,19 +85,19 @@ class WireProjector(
             JsonObject(
                 sortedMapOf(
                     "id" to JsonPrimitive(capture.notificationId),
-                    "key" to boundedString(capture.notificationKey, "$.notificationIdentity.key", truncations),
+                    "key" to boundedString(capture.notificationKey, "/notificationIdentity/key", truncations),
                     "postTimeEpochMillis" to JsonPrimitive(capture.postTimeEpochMillis),
                     "tag" to
                         (
                             capture.notificationTag?.let {
-                                boundedString(it, "$.notificationIdentity.tag", truncations)
+                                boundedString(it, "/notificationIdentity/tag", truncations)
                             } ?: JsonNull
                         ),
                 ),
             )
         val rawProvenance = rawCandidateProvenance(capture.rawCandidatesJson)
         val flattened = mutableListOf<Pair<String, JsonPrimitive>>()
-        flatten(envelope, "$.localEnvelope", flattened)
+        flatten(envelope, "/localEnvelope", flattened)
         val optional = linkedMapOf<String, JsonElement>()
         var omittedCount = 0
         val omittedPaths = mutableListOf<String>()
@@ -150,7 +153,7 @@ class WireProjector(
                         "localEnvelopeSha256" to JsonPrimitive(capture.envelopeSha256),
                         "localEnvelopeUtf8Bytes" to JsonPrimitive(capture.envelopeUtf8Bytes),
                         "notificationIdentity" to notificationIdentity,
-                        "packageName" to boundedString(capture.packageName, "$.packageName", truncations),
+                        "packageName" to boundedString(capture.packageName, "/packageName", truncations),
                         "projection" to projection,
                         "projectionVersion" to JsonPrimitive(1),
                         "rawCandidateProvenance" to rawProvenance,
@@ -195,10 +198,28 @@ class WireProjector(
         output: MutableList<Pair<String, JsonPrimitive>>,
     ) {
         when (element) {
-            is JsonObject -> element.toSortedMap().forEach { (key, value) -> flatten(value, "$path.$key", output) }
-            is JsonArray -> element.forEachIndexed { index, value -> flatten(value, "$path[$index]", output) }
-            is JsonPrimitive -> output += path to element
-            JsonNull -> output += path to JsonPrimitive("null")
+            is JsonObject -> {
+                element.toSortedMap().forEach { (key, value) ->
+                    flatten(value, pointer(path, key), output)
+                }
+            }
+
+            is JsonArray -> {
+                element.forEachIndexed {
+                    index,
+                    value,
+                    ->
+                    flatten(value, pointer(path, index.toString()), output)
+                }
+            }
+
+            is JsonPrimitive -> {
+                output += path to element
+            }
+
+            JsonNull -> {
+                output += path to JsonPrimitive("null")
+            }
         }
     }
 
@@ -213,14 +234,23 @@ class WireProjector(
         return JsonPrimitive(retained)
     }
 
-    private fun boundedPath(path: String): String = truncateUtf8(path, MAX_STRING_BYTES).first
+    private fun boundedPath(path: String): String {
+        if (path.toByteArray(StandardCharsets.UTF_8).size <= MAX_STRING_BYTES) return path
+        val suffix = "#${sha256(path)}"
+        return truncateUtf8(path, MAX_STRING_BYTES - suffix.length).first + suffix
+    }
+
+    private fun pointer(
+        parent: String,
+        segment: String,
+    ): String = "$parent/${segment.replace("~", "~0").replace("/", "~1")}"
 
     private fun projectionPriority(path: String): Int =
         when {
-            path.startsWith("$.localEnvelope.notification.") -> 0
-            path.startsWith("$.localEnvelope.rawTextSelectedField") -> 1
-            path.startsWith("$.localEnvelope.statusBarNotification.") -> 2
-            path.startsWith("$.localEnvelope.application.") -> 3
+            path.startsWith("/localEnvelope/notification/") -> 0
+            path.startsWith("/localEnvelope/rawTextSelectedField") -> 1
+            path.startsWith("/localEnvelope/statusBarNotification/") -> 2
+            path.startsWith("/localEnvelope/application/") -> 3
             else -> 4
         }
 
@@ -250,6 +280,13 @@ class WireProjector(
             is JsonObject -> JsonObject(element.toSortedMap().mapValues { canonicalize(it.value) })
             is JsonArray -> JsonArray(element.map(::canonicalize))
             else -> element
+        }
+
+    private fun containsNul(element: JsonElement): Boolean =
+        when (element) {
+            is JsonObject -> element.any { (key, value) -> '\u0000' in key || containsNul(value) }
+            is JsonArray -> element.any(::containsNul)
+            is JsonPrimitive -> element.isString && '\u0000' in element.content
         }
 
     private fun sha256(value: String): String =

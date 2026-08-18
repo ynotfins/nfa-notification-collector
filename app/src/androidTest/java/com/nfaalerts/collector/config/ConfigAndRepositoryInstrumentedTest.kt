@@ -8,8 +8,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationAccessStatus
 import com.nfaalerts.collector.capture.RawTextField
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -215,6 +219,87 @@ class ConfigAndRepositoryInstrumentedTest {
 
         assertEquals(expected, NotificationAccessStatus.isGranted(context, component))
     }
+
+    @Test
+    fun malformedSourceFailsClosedAcrossLaunchAndReopenWithoutCrashing() =
+        runBlocking {
+            val name = "collector-malformed-source-${System.nanoTime()}.json"
+            val file = File(context.filesDir, name)
+            try {
+                file.writeText("""{"configVersion":1,"sources":[{}]}""")
+
+                repeat(2) {
+                    val repository = SourceSelectionRepository(JsonSourceSelectionStore(context, name))
+                    repository.load()
+                    assertTrue(repository.snapshot().selections.isEmpty())
+                    assertTrue(repository.loadState.value is SelectionLoadState.Invalid)
+                }
+            } finally {
+                file.delete()
+            }
+        }
+
+    @Test
+    fun concurrentSourceAndSettingsUpdatesUseOneTransactionAndLoseNoFields() =
+        runBlocking {
+            val suffix = System.nanoTime()
+            val name = "collector-concurrent-$suffix.json"
+            val legacy = "collector-concurrent-legacy-$suffix.json"
+            val file = File(context.filesDir, name)
+            try {
+                val configRepository = CollectorConfigRepository(context, name)
+                val initial =
+                    """
+                    {
+                      "configVersion": 1,
+                      "deviceId": "before",
+                      "sources": [{
+                        "packageName": "com.example.one",
+                        "appLabel": "One",
+                        "sourceId": "weather",
+                        "enabled": true,
+                        "bnnMappingConfirmed": false,
+                        "rawTextOrder": ["bigText", "text"],
+                        "futureSource": {"keep": true}
+                      }],
+                      "futureTop": {"keep": true}
+                    }
+                    """.trimIndent().encodeToByteArray()
+                assertTrue(configRepository.savePayload(initial) is ConfigSaveResult.Saved)
+                val sourceStore = JsonSourceSelectionStore(configRepository, context, legacy)
+                val updatedSource = source("com.example.one").copy(appLabel = "Updated")
+
+                coroutineScope {
+                    listOf(
+                        async(Dispatchers.IO) { sourceStore.save(listOf(updatedSource)) },
+                        async(Dispatchers.IO) {
+                            configRepository.updateRoot { root ->
+                                kotlinx.serialization.json.JsonObject(
+                                    root.toMutableMap().apply {
+                                        put("deviceId", kotlinx.serialization.json.JsonPrimitive("after"))
+                                    },
+                                )
+                            }
+                        },
+                    ).forEach { it.await() }
+                }
+
+                val root = Json.parseToJsonElement(file.readText()).jsonObject
+                val sourceRoot =
+                    root
+                        .getValue("sources")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                assertEquals("after", root.getValue("deviceId").jsonPrimitive.content)
+                assertEquals("Updated", sourceRoot.getValue("appLabel").jsonPrimitive.content)
+                assertTrue("futureSource" in sourceRoot)
+                assertTrue("futureTop" in root)
+            } finally {
+                file.delete()
+                File(context.filesDir, legacy).delete()
+            }
+        }
 
     private fun source(packageName: String) =
         SourceSelection(

@@ -106,24 +106,74 @@ class WireProjectorTest {
                 .jsonObject
 
         assertEquals("configured-phone", body.getValue("deviceId").jsonPrimitive.content)
-        assertTrue("$.localEnvelope.notification.title" in optional)
+        assertTrue("/localEnvelope/notification/title" in optional)
+    }
+
+    @Test
+    fun rfc6901PathsKeepDottedBracketedNestedAndEscapedKeysDistinct() {
+        val envelope =
+            """
+            {
+              "a.b": "dot",
+              "a": {"b": "nested"},
+              "x[0]": "bracket",
+              "x": ["array"],
+              "a/b~c": "escaped"
+            }
+            """.trimIndent()
+
+        val result = projector.project(capture(envelopeJson = envelope)) as WireProjectionResult.Ready
+        val optional =
+            result.metadata
+                .getValue("projection")
+                .jsonObject
+                .getValue("optional")
+                .jsonObject
+
+        listOf(
+            "/localEnvelope/a.b",
+            "/localEnvelope/a/b",
+            "/localEnvelope/x[0]",
+            "/localEnvelope/x/0",
+            "/localEnvelope/a~1b~0c",
+        ).forEach { pointer -> assertTrue("missing $pointer", pointer in optional) }
+        assertEquals(5, optional.size)
+    }
+
+    @Test
+    fun nulInAnyProjectedMetadataKeyOrStringIsQuarantined() {
+        val fixtures =
+            listOf(
+                capture(envelopeJson = """{"bad\u0000key":"value"}"""),
+                capture(envelopeJson = """{"value":"bad\u0000value"}"""),
+                capture(packageName = "bad\u0000package"),
+                capture(notificationKey = "bad\u0000key"),
+                capture(rawCandidatesJson = """{"bad\u0000field":["value"]}"""),
+            )
+
+        fixtures.forEach { fixture ->
+            assertEquals(WireProjectionResult.Quarantined("WIRE_METADATA_NUL", 1), projector.project(fixture))
+        }
     }
 
     private fun capture(
         sourceId: String = "bnn",
         rawText: String = "raw",
         envelopeJson: String = """{"notification":{"title":"Alert"}}""",
+        packageName: String = "us.example.bnn",
+        notificationKey: String = "notification-key",
+        rawCandidatesJson: String = """{"bigText":["raw"],"text":["short"]}""",
     ) = CapturedNotificationEntity(
         eventId = "123e4567-e89b-12d3-a456-426614174000",
-        packageName = "us.example.bnn",
+        packageName = packageName,
         sourceId = sourceId,
-        notificationKey = "notification-key",
+        notificationKey = notificationKey,
         notificationId = 42,
         notificationTag = "tag",
         postTimeEpochMillis = 1_755_516_000_000L,
         capturedAtEpochMillis = 1_755_516_100_000L,
         rawText = rawText,
-        rawCandidatesJson = """{"bigText":["raw"],"text":["short"]}""",
+        rawCandidatesJson = rawCandidatesJson,
         envelopeJson = envelopeJson,
         envelopeSha256 = "abc123",
         envelopeUtf8Bytes = envelopeJson.encodeToByteArray().size,

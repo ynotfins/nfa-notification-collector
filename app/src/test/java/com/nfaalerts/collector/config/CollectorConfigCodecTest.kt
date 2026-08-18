@@ -39,21 +39,21 @@ class CollectorConfigCodecTest {
         val result = codec.decode(payload.encodeToByteArray()) as ConfigDecodeResult.Invalid
 
         assertTrue(
-            result.errors.contains(ConfigValidationError("$.deviceId", "DEVICE_ID_FORMAT", "Device ID is invalid.")),
+            result.errors.contains(ConfigValidationError("/deviceId", "DEVICE_ID_FORMAT", "Device ID is invalid.")),
         )
         assertTrue(
             result.errors.contains(
                 ConfigValidationError(
-                    "$.activeEndpointProfile",
+                    "/activeEndpointProfile",
                     "ACTIVE_ENDPOINT_MISSING",
                     "Active endpoint profile does not exist.",
                 ),
             ),
         )
-        assertTrue(result.errors.any { it.path == "$.endpointProfiles.clear.baseUrl" && it.code == "HTTPS_REQUIRED" })
+        assertTrue(result.errors.any { it.path == "/endpointProfiles/clear/baseUrl" && it.code == "HTTPS_REQUIRED" })
         assertTrue(
             result.errors.any {
-                it.path == "$.endpointProfiles.clear.ingestPath" &&
+                it.path == "/endpointProfiles/clear/ingestPath" &&
                     it.code == "INGEST_PATH_FORMAT"
             },
         )
@@ -79,6 +79,17 @@ class CollectorConfigCodecTest {
                 .toString(),
         )
         assertEquals("nfa-primary-phone", result.document.config.deviceId)
+    }
+
+    @Test
+    fun exportPreservesUnknownSafeObjectFieldOrderAndBytes() {
+        val payload =
+            """{"configVersion":1,"sources":[],"futureSafe":{"z":1,"a":2}}""".encodeToByteArray()
+
+        val result = codec.decode(payload) as ConfigDecodeResult.Valid
+        val exported = codec.exportPayload(result.document).decodeToString()
+
+        assertTrue(exported.contains("\"futureSafe\":{\"z\":1,\"a\":2}"))
     }
 
     @Test
@@ -121,6 +132,12 @@ class CollectorConfigCodecTest {
                 "notificationPayload",
                 "deliveryRows",
                 "apiToken",
+                "accessTokenValue",
+                "databasePassword",
+                "clientSecretValue",
+                "privateKeyPem",
+                "apiKeyValue",
+                "serviceCredential",
             )
 
         sensitiveFields.forEach { field ->
@@ -135,6 +152,19 @@ class CollectorConfigCodecTest {
     }
 
     @Test
+    fun nonsecretWordsThatOnlyContainSensitiveSubstringsRemainPreserved() {
+        val payload =
+            """{"configVersion":1,"sources":[],"secretaryLabel":"dispatch","tokenizationMode":"none","privateMode":false}"""
+
+        val result = codec.decode(payload.encodeToByteArray()) as ConfigDecodeResult.Valid
+        val exported = codec.exportPayload(result.document).decodeToString()
+
+        assertTrue(exported.contains("\"secretaryLabel\":\"dispatch\""))
+        assertTrue(exported.contains("\"tokenizationMode\":\"none\""))
+        assertTrue(exported.contains("\"privateMode\":false"))
+    }
+
+    @Test
     fun wrongJsonShapesReturnTypedErrorsInsteadOfThrowing() {
         val payload =
             """{"configVersion":1,"deviceId":{},"activeEndpointProfile":[],"endpointProfiles":[],"sources":{},"delivery":"bad","retention":false,"diagnostics":0}"""
@@ -142,13 +172,98 @@ class CollectorConfigCodecTest {
         val result = codec.decode(payload.encodeToByteArray()) as ConfigDecodeResult.Invalid
 
         listOf(
-            "$.deviceId",
-            "$.activeEndpointProfile",
-            "$.endpointProfiles",
-            "$.sources",
-            "$.delivery",
-            "$.retention",
-            "$.diagnostics",
+            "/deviceId",
+            "/activeEndpointProfile",
+            "/endpointProfiles",
+            "/sources",
+            "/delivery",
+            "/retention",
+            "/diagnostics",
         ).forEach { path -> assertTrue("missing $path", result.errors.any { it.path == path }) }
+    }
+
+    @Test
+    fun everySourceItemIsFullyValidatedBeforeSave() {
+        val payload = """{"configVersion":1,"sources":[{}]}""".encodeToByteArray()
+
+        val result = codec.decode(payload) as ConfigDecodeResult.Invalid
+
+        listOf(
+            "/sources/0/packageName",
+            "/sources/0/appLabel",
+            "/sources/0/sourceId",
+            "/sources/0/enabled",
+            "/sources/0/bnnMappingConfirmed",
+            "/sources/0/rawTextOrder",
+        ).forEach { path -> assertTrue("missing $path", result.errors.any { it.path == path }) }
+    }
+
+    @Test
+    fun sourceDuplicatesCandidateEnumsAndBnnConfirmationAreRejected() {
+        val payload =
+            """
+            {
+              "configVersion": 1,
+              "sources": [
+                {
+                  "packageName": "com.example.same",
+                  "appLabel": "One",
+                  "sourceId": "bnn",
+                  "enabled": true,
+                  "bnnMappingConfirmed": false,
+                  "rawTextOrder": ["bigText", "unknown", "bigText"]
+                },
+                {
+                  "packageName": "com.example.same",
+                  "appLabel": "Two",
+                  "sourceId": "weather",
+                  "enabled": true,
+                  "bnnMappingConfirmed": true,
+                  "rawTextOrder": ["text"]
+                }
+              ]
+            }
+            """.trimIndent().encodeToByteArray()
+
+        val result = codec.decode(payload) as ConfigDecodeResult.Invalid
+
+        assertTrue(result.errors.any { it.path == "/sources/1/packageName" && it.code == "DUPLICATE_SOURCE_PACKAGE" })
+        assertTrue(
+            result.errors.any {
+                it.path == "/sources/0/bnnMappingConfirmed" &&
+                    it.code == "BNN_CONFIRMATION_REQUIRED"
+            },
+        )
+        assertTrue(
+            result.errors.any {
+                it.path == "/sources/1/bnnMappingConfirmed" &&
+                    it.code == "BNN_CONFIRMATION_FORBIDDEN"
+            },
+        )
+        assertTrue(result.errors.any { it.path == "/sources/0/rawTextOrder/1" && it.code == "RAW_TEXT_FIELD_UNKNOWN" })
+        assertTrue(
+            result.errors.any { it.path == "/sources/0/rawTextOrder/2" && it.code == "RAW_TEXT_FIELD_DUPLICATE" },
+        )
+    }
+
+    @Test
+    fun jsonPointersEscapeSlashAndTildeSegments() {
+        val payload =
+            """{"configVersion":1,"activeEndpointProfile":"a/b~c","endpointProfiles":{"a/b~c":{"baseUrl":"http://invalid","ingestPath":"bad"}},"sources":[]}"""
+
+        val result = codec.decode(payload.encodeToByteArray()) as ConfigDecodeResult.Invalid
+
+        assertTrue(result.errors.any { it.path == "/endpointProfiles/a~1b~0c/baseUrl" })
+        assertTrue(result.errors.any { it.path == "/endpointProfiles/a~1b~0c/ingestPath" })
+    }
+
+    @Test
+    fun payloadOverOneMibFailsBeforeJsonParse() {
+        val result = codec.decode(ByteArray(1_048_577) { '{'.code.toByte() }) as ConfigDecodeResult.Invalid
+
+        assertEquals(
+            ConfigValidationError("/", "CONFIG_PAYLOAD_LIMIT", "Configuration exceeds 1 MiB."),
+            result.errors.single(),
+        )
     }
 }

@@ -20,10 +20,19 @@ fun interface UniqueWorkEnqueuer {
     )
 }
 
+/**
+ * Maintains one replaceable unique drain. REPLACE preempts an obsolete delayed request when earlier
+ * database work appears. The in-process earliest-due guard prevents a cancelled active worker's
+ * later lease wake from replacing that earlier request; Room lease recovery is the durable fallback
+ * after process death.
+ */
 class DeliveryWorkScheduler(
     private val enqueuer: UniqueWorkEnqueuer,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : DeliveryScheduler {
+    private val scheduleLock = Any()
+    private var scheduledDueAtEpochMillis: Long = Long.MAX_VALUE
+
     constructor(context: Context) : this(
         enqueuer =
             UniqueWorkEnqueuer { name, policy, request ->
@@ -32,11 +41,17 @@ class DeliveryWorkScheduler(
     )
 
     override fun ensureScheduled(dueAtEpochMillis: Long) {
-        enqueuer.enqueue(UNIQUE_WORK_NAME, ExistingWorkPolicy.KEEP, request(dueAtEpochMillis))
+        synchronized(scheduleLock) {
+            if (dueAtEpochMillis >= scheduledDueAtEpochMillis) return
+            enqueuer.enqueue(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request(dueAtEpochMillis))
+            scheduledDueAtEpochMillis = dueAtEpochMillis
+        }
     }
 
-    fun enqueueFollowUp(dueAtEpochMillis: Long) {
-        enqueuer.enqueue(UNIQUE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request(dueAtEpochMillis))
+    fun onWorkerStarted() {
+        synchronized(scheduleLock) {
+            scheduledDueAtEpochMillis = Long.MAX_VALUE
+        }
     }
 
     private fun request(dueAtEpochMillis: Long): OneTimeWorkRequest =
@@ -57,9 +72,11 @@ class DeliveryDrainWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as? NfaCollectorApp ?: return Result.failure()
         val container = app.appContainer
+        container.deliveryScheduler.onWorkerStarted()
+        container.recoverExpiredSending()
         container.deliveryCoordinator.drainAvailable("worker-$id")
         container.runDeliveryMaintenance()
-        container.nextDeliveryDueAt()?.let(container.deliveryScheduler::enqueueFollowUp)
+        container.nextDeliveryDueAt()?.let(container.deliveryScheduler::ensureScheduled)
         return Result.success()
     }
 }

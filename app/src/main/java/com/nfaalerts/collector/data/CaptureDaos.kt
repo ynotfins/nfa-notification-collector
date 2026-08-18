@@ -194,8 +194,15 @@ abstract class DeliveryDao {
 
     @Query(
         """
-        SELECT MIN(COALESCE(nextAttemptAtEpochMillis, createdAtEpochMillis)) FROM delivery_outbox
-        WHERE state IN ('PENDING', 'RETRY_WAIT')
+        SELECT MIN(dueAt) FROM (
+          SELECT COALESCE(nextAttemptAtEpochMillis, createdAtEpochMillis) AS dueAt
+          FROM delivery_outbox
+          WHERE state IN ('PENDING', 'RETRY_WAIT')
+          UNION ALL
+          SELECT leaseExpiresAtEpochMillis AS dueAt
+          FROM delivery_outbox
+          WHERE state = 'SENDING' AND leaseExpiresAtEpochMillis IS NOT NULL
+        )
         """,
     )
     abstract suspend fun nextDueAtEpochMillis(): Long?
@@ -270,9 +277,11 @@ abstract class RetentionDao {
 }
 
 @Dao
-abstract class DiagnosticsDao {
+internal abstract class DiagnosticsDao {
     @Insert
-    abstract suspend fun insert(event: DiagnosticEventEntity)
+    protected abstract suspend fun insertRow(event: DiagnosticEventEntity)
+
+    internal open suspend fun insertFromRepository(event: DiagnosticEventEntity) = insertRow(event)
 
     @Query("DELETE FROM diagnostic_events WHERE createdAtEpochMillis < :cutoffEpochMillis")
     protected abstract suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int

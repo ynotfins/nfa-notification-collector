@@ -2,10 +2,15 @@ package com.nfaalerts.collector.delivery
 
 import com.nfaalerts.collector.config.EndpointProfile
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
+import okio.Buffer
+import okio.BufferedSource
+import okio.ForwardingSource
+import okio.buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,10 +127,10 @@ class IngestClientTest {
     }
 
     @Test
-    fun cleartextAndNonBnnRequestsAreRejectedBeforeNetwork() {
+    fun cleartextBnnRequestReachesEndpointValidationAndIsRejectedBeforeNetwork() {
         val payload =
             WireProjectionResult.Ready(
-                source = "weather",
+                source = "bnn",
                 bodyBytes = "{}".encodeToByteArray(),
                 metadata = kotlinx.serialization.json.JsonObject(emptyMap()),
             )
@@ -141,6 +146,27 @@ class IngestClientTest {
             }.isFailure,
         )
         assertFalse(server.requestCount > 0)
+    }
+
+    @Test
+    fun nonBnnRequestIsRejectedBeforeNetwork() {
+        val payload =
+            WireProjectionResult.Ready(
+                source = "weather",
+                bodyBytes = "{}".encodeToByteArray(),
+                metadata = kotlinx.serialization.json.JsonObject(emptyMap()),
+            )
+
+        assertTrue(
+            runCatching {
+                OkHttpIngestClient(client).send(
+                    EndpointProfile("https://example.invalid", "/v1/ingest/alerts"),
+                    CharArray(1) { 'x' },
+                    payload,
+                )
+            }.isFailure,
+        )
+        assertEquals(0, server.requestCount)
     }
 
     @Test
@@ -196,5 +222,52 @@ class IngestClientTest {
 
         assertEquals(IngestResult.Quarantined("HTTP_302", 302), result)
         assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun responseBodyOver64KibIsRejectedWithoutUnboundedParsing() {
+        server.enqueue(MockResponse().setResponseCode(202).setBody("x".repeat(65_537)))
+        server.start()
+        val payload =
+            WireProjectionResult.Ready(
+                source = "bnn",
+                bodyBytes = "{}".encodeToByteArray(),
+                metadata = kotlinx.serialization.json.JsonObject(emptyMap()),
+            )
+
+        val result =
+            OkHttpIngestClient(client).send(
+                EndpointProfile(server.url("/").toString().removeSuffix("/"), "/v1/ingest/alerts"),
+                CharArray(43) { 'x' },
+                payload,
+            )
+
+        assertEquals(IngestResult.Quarantined("MALFORMED_202", 202), result)
+    }
+
+    @Test
+    fun boundedReaderStopsAfterLimitPlusOneByte() {
+        val upstream = Buffer().write(ByteArray(1_048_576) { 'x'.code.toByte() })
+        var bytesRead = 0L
+        val counted =
+            object : ForwardingSource(upstream) {
+                override fun read(
+                    sink: Buffer,
+                    byteCount: Long,
+                ): Long = super.read(sink, byteCount).also { if (it > 0L) bytesRead += it }
+            }.buffer()
+        val body =
+            object : ResponseBody() {
+                override fun contentType() = null
+
+                override fun contentLength() = -1L
+
+                override fun source(): BufferedSource = counted
+            }
+
+        val result = BoundedResponseReader(65_536).read(body)
+
+        assertEquals(BoundedBodyResult.TooLarge, result)
+        assertTrue(bytesRead <= 65_536L + 8_192L)
     }
 }

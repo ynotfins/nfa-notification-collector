@@ -11,8 +11,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import okio.Buffer
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.nio.charset.StandardCharsets
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
 import java.util.UUID
@@ -38,6 +41,33 @@ sealed interface IngestResult {
         val code: String,
         val httpStatus: Int?,
     ) : IngestResult
+}
+
+sealed interface BoundedBodyResult {
+    data class Text(
+        val value: String,
+    ) : BoundedBodyResult
+
+    data object TooLarge : BoundedBodyResult
+}
+
+class BoundedResponseReader(
+    private val maximumBytes: Long = 65_536L,
+) {
+    fun read(body: ResponseBody): BoundedBodyResult {
+        if (body.contentLength() > maximumBytes) return BoundedBodyResult.TooLarge
+        val source = body.source()
+        val buffer = Buffer()
+        var total = 0L
+        while (total <= maximumBytes) {
+            val remaining = maximumBytes + 1L - total
+            val read = source.read(buffer, minOf(8_192L, remaining))
+            if (read < 0L) return BoundedBodyResult.Text(buffer.readString(StandardCharsets.UTF_8))
+            total += read
+        }
+        buffer.clear()
+        return BoundedBodyResult.TooLarge
+    }
 }
 
 class IngestResponseClassifier {
@@ -83,6 +113,7 @@ class IngestResponseClassifier {
 class OkHttpIngestClient(
     private val client: OkHttpClient,
     private val classifier: IngestResponseClassifier = IngestResponseClassifier(),
+    private val responseReader: BoundedResponseReader = BoundedResponseReader(),
 ) {
     fun send(
         settings: RuntimeDeliverySettings,
@@ -143,7 +174,14 @@ class OkHttpIngestClient(
                 .build()
         return try {
             restrictedClient.newCall(request).execute().use { response ->
-                classifier.classify(response.code, response.body.string())
+                if (response.code != 202) {
+                    classifier.classify(response.code, "")
+                } else {
+                    when (val body = responseReader.read(response.body)) {
+                        is BoundedBodyResult.Text -> classifier.classify(response.code, body.value)
+                        BoundedBodyResult.TooLarge -> IngestResult.Quarantined("MALFORMED_202", 202)
+                    }
+                }
             }
         } catch (failure: IOException) {
             classifier.networkFailure(failure)

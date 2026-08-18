@@ -7,6 +7,10 @@ import androidx.sqlite.execSQL
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.nfaalerts.collector.diagnostics.DiagnosticRepository
+import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -87,16 +91,40 @@ class DeliveryDatabaseInstrumentedTest {
 
             val claims =
                 coroutineScope {
+                    val start = CompletableDeferred<Unit>()
                     listOf(
-                        async { database!!.deliveryDao().claimDue("immediate", 10_000L, 610_000L) },
-                        async { database!!.deliveryDao().claimDue("worker", 10_000L, 610_000L) },
-                    ).awaitAll()
+                        async(Dispatchers.IO) {
+                            start.await()
+                            database!!.deliveryDao().claimDue("immediate", 10_000L, 610_000L)
+                        },
+                        async(Dispatchers.IO) {
+                            start.await()
+                            database!!.deliveryDao().claimDue("worker", 10_000L, 610_000L)
+                        },
+                    ).also { start.complete(Unit) }.awaitAll()
                 }
 
             assertEquals(1, claims.count { it?.eventId == "due" })
             assertTrue(claims.filterNotNull().single().attemptCount == 1)
             assertNull(database!!.deliveryDao().claimDue("worker", 10_000L, 610_000L))
             assertEquals(DeliveryState.RETRY_WAIT, database!!.captureReadDao().outbox("future")?.state)
+        }
+
+    @Test
+    fun sendingLeaseIsTheNextWakeBeforeExpiryAndBecomesDueAfterRecovery() =
+        runBlocking {
+            database = inMemoryDatabase()
+            insert("leased", DeliveryState.PENDING)
+            assertNotNull(database!!.deliveryDao().claimDue("owner", 0L, 600_000L))
+
+            assertEquals(600_000L, database!!.deliveryDao().nextDueAtEpochMillis())
+            assertEquals(0, database!!.deliveryDao().recoverStaleSending(599_999L))
+            assertEquals(DeliveryState.SENDING, database!!.captureReadDao().outbox("leased")?.state)
+            assertEquals(600_000L, database!!.deliveryDao().nextDueAtEpochMillis())
+
+            assertEquals(1, database!!.deliveryDao().recoverStaleSending(600_001L))
+            assertEquals(600_001L, database!!.deliveryDao().nextDueAtEpochMillis())
+            assertNotNull(database!!.deliveryDao().claimDue("recovery", 600_001L, 1_200_001L))
         }
 
     @Test
@@ -179,17 +207,14 @@ class DeliveryDatabaseInstrumentedTest {
             database = inMemoryDatabase()
             val dao = database!!.diagnosticsDao()
             (1L..5L).forEach { index ->
-                dao.insert(
-                    DiagnosticEventEntity(
-                        diagnosticId = "d-$index",
-                        createdAtEpochMillis = index,
-                        eventCode = "SAFE_EVENT",
-                        safeDetailsJson = "{}",
-                    ),
-                )
+                DiagnosticRepository(
+                    RoomDiagnosticStore(dao),
+                    clock = { index },
+                    idFactory = { "d-$index" },
+                    retentionDays = 14,
+                    maxRows = 2,
+                ).record("DELIVERY_RETRY", mapOf("state" to "RETRY_WAIT"))
             }
-
-            dao.prune(cutoffEpochMillis = 2L, maxRows = 2)
 
             assertEquals(listOf("d-5", "d-4"), dao.recent(10).map(DiagnosticEventEntity::diagnosticId))
         }

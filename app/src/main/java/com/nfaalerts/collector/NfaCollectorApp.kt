@@ -46,18 +46,20 @@ class NfaCollectorApp : Application() {
 
 class AppContainer(
     application: Application,
+    private val databaseFactory: () -> NfaCollectorDatabase = {
+        NfaCollectorDatabase.create(application.applicationContext)
+    },
+    val deliveryScheduler: DeliveryWorkScheduler = DeliveryWorkScheduler(application.applicationContext),
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val configStore = AtomicCollectorConfigStore(application.applicationContext)
     val sourceSelections =
-        SourceSelectionRepository(JsonSourceSelectionStore(application.applicationContext))
+        SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
     val listenerStatus = ListenerStatusRepository()
-    private val database: NfaCollectorDatabase by lazy {
-        NfaCollectorDatabase.create(application.applicationContext)
-    }
-    private val configStore = AtomicCollectorConfigStore(application.applicationContext)
+    private val database: NfaCollectorDatabase by lazy(databaseFactory)
     private val bearerStore = AndroidKeystoreBearerStore(application.applicationContext)
-    val deliveryScheduler = DeliveryWorkScheduler(application.applicationContext)
     private val deliveryStore by lazy { RoomDeliveryStore(database) }
     private val ingestClient =
         OkHttpIngestClient(
@@ -101,26 +103,30 @@ class AppContainer(
     }
 
     fun startDeliveryRecovery() {
-        scope.launch {
-            val now = System.currentTimeMillis()
-            database.deliveryDao().recoverStaleSending(now)
-            database.deliveryDao().requeuePausedAuth(relevantRevision(), now)
-            database.deliveryDao().nextDueAtEpochMillis()?.let(deliveryScheduler::ensureScheduled)
-            runDeliveryMaintenance()
-        }
+        scope.launch { recoverDeliveryOnStartup() }
+    }
+
+    suspend fun recoverDeliveryOnStartup() {
+        val now = clock()
+        database.deliveryDao().recoverStaleSending(now)
+        relevantRevision()?.let { database.deliveryDao().requeuePausedAuth(it, now) }
+        database.deliveryDao().nextDueAtEpochMillis()?.let(deliveryScheduler::ensureScheduled)
+        runDeliveryMaintenance()
     }
 
     suspend fun onRelevantConfigurationChanged() {
-        val now = System.currentTimeMillis()
-        database.deliveryDao().requeuePausedAuth(relevantRevision(), now)
+        val now = clock()
+        relevantRevision()?.let { database.deliveryDao().requeuePausedAuth(it, now) }
         database.deliveryDao().nextDueAtEpochMillis()?.let(deliveryScheduler::ensureScheduled)
     }
 
     suspend fun nextDeliveryDueAt(): Long? = database.deliveryDao().nextDueAtEpochMillis()
 
+    suspend fun recoverExpiredSending(): Int = database.deliveryDao().recoverStaleSending(clock())
+
     suspend fun runDeliveryMaintenance() {
         val document = loadConfigDocument().first
-        val now = System.currentTimeMillis()
+        val now = clock()
         val sentCutoff =
             now -
                 TimeUnit.DAYS.toMillis(
@@ -138,7 +144,7 @@ class AppContainer(
     }
 
     private fun startImmediateDeliveryAfterPersist(eventId: String) {
-        val now = System.currentTimeMillis()
+        val now = clock()
         deliveryScheduler.ensureScheduled(now)
         scope.launch { deliveryCoordinator.drainAvailable("immediate-$eventId", maximumClaims = 1) }
     }
@@ -150,27 +156,37 @@ class AppContainer(
             when (bearerState) {
                 is BearerLoadState.Present -> BearerLoad.Present(bearerState.value)
                 BearerLoadState.Missing -> BearerLoad.Missing
+                BearerLoadState.TemporaryFailure -> BearerLoad.TemporaryFailure
             }
+        val bearerRevision = (bearerState as? BearerLoadState.Present)?.revision ?: 0L
         return RuntimeDeliverySettings(
             endpoint = document.config.activeEndpoint,
-            relevantRevision = relevantRevision(document),
+            relevantRevision = relevantRevision(document, bearerRevision),
             bearer = bearer,
             deviceId = document.config.deviceId,
             connectTimeoutMs = document.config.delivery.connectTimeoutMs,
             readTimeoutMs = document.config.delivery.readTimeoutMs,
+            initialBackoffMs = document.config.delivery.initialBackoffMs,
+            maxBackoffMs = document.config.delivery.maxBackoffMs,
         )
     }
 
-    private suspend fun relevantRevision(): Long = relevantRevision(loadConfigDocument().first)
+    private suspend fun relevantRevision(): Long? {
+        val bearerRevision = bearerStore.revisionFingerprint() ?: return null
+        return relevantRevision(loadConfigDocument().first, bearerRevision)
+    }
 
-    private suspend fun relevantRevision(document: com.nfaalerts.collector.config.CollectorConfigDocument): Long {
+    private fun relevantRevision(
+        document: com.nfaalerts.collector.config.CollectorConfigDocument,
+        bearerRevision: Long,
+    ): Long {
         val relevant =
             listOf(
                 document.config.deviceId,
                 document.config.activeEndpointProfile,
                 document.config.activeEndpoint.baseUrl,
                 document.config.activeEndpoint.ingestPath,
-                bearerStore.revisionFingerprint().toString(),
+                bearerRevision.toString(),
             ).joinToString("\u0000")
         val digest = MessageDigest.getInstance("SHA-256").digest(relevant.encodeToByteArray())
         return ByteBuffer.wrap(digest, 0, java.lang.Long.BYTES).long

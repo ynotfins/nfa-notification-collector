@@ -70,4 +70,24 @@ class AtomicCollectorConfigStoreInstrumentedTest {
                 file.delete()
             }
         }
+
+    @Test
+    fun invalidSourceShapeIsRejectedBeforeAtomicReplacement() =
+        runBlocking {
+            val name = "atomic-source-${System.nanoTime()}.json"
+            val file = File(context.filesDir, name)
+            try {
+                val store = AtomicCollectorConfigStore(context, name)
+                val good = CollectorConfigCodec().exportPayload(CollectorConfigCodec().defaultDocument())
+                assertTrue(store.savePayload(good) is ConfigSaveResult.Saved)
+                val before = file.readBytes()
+
+                val result = store.savePayload("""{"configVersion":1,"sources":[{}]}""".encodeToByteArray())
+
+                assertTrue(result is ConfigSaveResult.Rejected)
+                assertArrayEquals(before, file.readBytes())
+            } finally {
+                file.delete()
+            }
+        }
 }

@@ -27,7 +27,7 @@ abstract class NfaCollectorDatabase : RoomDatabase() {
 
     abstract fun retentionDao(): RetentionDao
 
-    abstract fun diagnosticsDao(): DiagnosticsDao
+    internal abstract fun diagnosticsDao(): DiagnosticsDao
 
     companion object {
         const val DATABASE_NAME = "nfa-notification-collector.db"

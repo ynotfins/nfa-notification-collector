@@ -7,8 +7,10 @@
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+        android:icon="@drawable/ic_collector"
         android:label="NFA Notification Collector"
         android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@drawable/ic_collector"
         android:theme="@style/Theme.NfaCollector"
         android:usesCleartextTraffic="false">
         <activity

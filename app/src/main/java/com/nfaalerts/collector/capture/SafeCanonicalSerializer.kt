@@ -2,7 +2,6 @@
 
 package com.nfaalerts.collector.capture
 
-import android.annotation.TargetApi
 import android.app.PendingIntent
 import android.app.Person
 import android.graphics.Bitmap
@@ -11,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
+import androidx.annotation.RequiresApi
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -682,7 +682,7 @@ class SafeCanonicalSerializer(
             ),
         )
 
-    @TargetApi(Build.VERSION_CODES.P)
+    @RequiresApi(Build.VERSION_CODES.P)
     private fun Person.toSafePerson(): SafePersonValue =
         SafePersonValue(
             name = name?.toString(),

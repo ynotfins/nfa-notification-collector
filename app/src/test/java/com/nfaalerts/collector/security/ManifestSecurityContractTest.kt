@@ -30,6 +30,8 @@ class ManifestSecurityContractTest {
             application.getAttributeNS(ANDROID_NS, "dataExtractionRules"),
         )
         assertEquals("false", application.getAttributeNS(ANDROID_NS, "usesCleartextTraffic"))
+        assertEquals("@drawable/ic_collector", application.getAttributeNS(ANDROID_NS, "icon"))
+        required("src/main/res/drawable/ic_collector.xml")
 
         assertEquals(0, permissionCount(main, "android.permission.QUERY_ALL_PACKAGES"))
         assertEquals(1, permissionCount(parse(debugManifest), "android.permission.QUERY_ALL_PACKAGES"))

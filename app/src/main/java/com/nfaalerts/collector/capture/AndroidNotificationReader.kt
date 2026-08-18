@@ -2,12 +2,12 @@
 
 package com.nfaalerts.collector.capture
 
-import android.annotation.TargetApi
 import android.app.Notification
 import android.app.Person
 import android.app.RemoteInput
 import android.os.Build
 import android.os.Bundle
+import androidx.annotation.RequiresApi
 
 data class AndroidNotificationSnapshot(
     val envelopeValues: Map<String, Any?>,
@@ -141,7 +141,7 @@ object AndroidNotificationReader {
         }
     }
 
-    @TargetApi(Build.VERSION_CODES.P)
+    @RequiresApi(Build.VERSION_CODES.P)
     private fun Person.toSafePerson() =
         SafePersonValue(
             name = name?.toString(),

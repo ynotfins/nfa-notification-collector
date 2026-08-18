@@ -3,6 +3,9 @@ package com.nfaalerts.collector.delivery
 import com.nfaalerts.collector.config.EndpointProfile
 import com.nfaalerts.collector.data.CapturedNotificationEntity
 import com.nfaalerts.collector.data.DeliveryOutboxEntity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 sealed interface BearerLoad {
     data class Present(
@@ -10,6 +13,8 @@ sealed interface BearerLoad {
     ) : BearerLoad
 
     data object Missing : BearerLoad
+
+    data object TemporaryFailure : BearerLoad
 }
 
 data class RuntimeDeliverySettings(
@@ -19,6 +24,8 @@ data class RuntimeDeliverySettings(
     val deviceId: String = "nfa-primary-phone",
     val connectTimeoutMs: Long = 15_000L,
     val readTimeoutMs: Long = 30_000L,
+    val initialBackoffMs: Long = 30_000L,
+    val maxBackoffMs: Long = 21_600_000L,
 )
 
 fun interface DeliverySettingsProvider {
@@ -31,6 +38,13 @@ fun interface IngestTransport {
         bearer: CharArray,
         payload: WireProjectionResult.Ready,
     ): IngestResult
+}
+
+fun interface ProjectionEngine {
+    fun project(
+        capture: CapturedNotificationEntity,
+        deviceId: String,
+    ): WireProjectionResult
 }
 
 interface DeliveryScheduler {
@@ -86,34 +100,63 @@ class DeliveryCoordinator(
     private val settings: DeliverySettingsProvider,
     private val transport: IngestTransport,
     private val scheduler: DeliveryScheduler,
-    private val projector: WireProjector = WireProjector(),
+    private val projector: ProjectionEngine =
+        ProjectionEngine {
+            capture,
+            deviceId,
+            ->
+            WireProjector().project(capture, deviceId)
+        },
     private val clock: () -> Long = System::currentTimeMillis,
     private val retryPolicy: RetryPolicy = RetryPolicy(),
 ) {
     suspend fun drainOne(owner: String): Boolean {
-        val now = clock()
-        val claim = store.claimDue(owner, now, now + LEASE_DURATION_MS) ?: return false
-        val capture = store.capture(claim.eventId)
-        if (capture == null) {
-            store.markQuarantined(claim.eventId, owner, now, "CAPTURE_MISSING", null)
-            scheduleNext()
-            return true
-        }
-        val runtime = settings.load()
-        when (val projection = projector.project(capture, runtime.deviceId)) {
-            WireProjectionResult.BlockedContract -> {
-                store.markQuarantined(claim.eventId, owner, now, "NON_BNN_CONTRACT", null)
+        val claimStartedAt = clock()
+        val claim =
+            store.claimDue(owner, claimStartedAt, claimStartedAt + LEASE_DURATION_MS)
+                ?: return false
+        var retryBounds = RetryBounds(DEFAULT_INITIAL_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS)
+        try {
+            val capture = store.capture(claim.eventId)
+            if (capture == null) {
+                store.markQuarantined(claim.eventId, owner, completionTime(claimStartedAt), "CAPTURE_MISSING", null)
+                return true
             }
+            val runtime = settings.load()
+            retryBounds = RetryBounds(runtime.initialBackoffMs, runtime.maxBackoffMs)
+            when (val projection = projector.project(capture, runtime.deviceId)) {
+                WireProjectionResult.BlockedContract -> {
+                    store.markQuarantined(
+                        claim.eventId,
+                        owner,
+                        completionTime(claimStartedAt),
+                        "NON_BNN_CONTRACT",
+                        null,
+                    )
+                }
 
-            is WireProjectionResult.Quarantined -> {
-                store.markQuarantined(claim.eventId, owner, now, projection.code, null)
-            }
+                is WireProjectionResult.Quarantined -> {
+                    store.markQuarantined(
+                        claim.eventId,
+                        owner,
+                        completionTime(claimStartedAt),
+                        projection.code,
+                        null,
+                    )
+                }
 
-            is WireProjectionResult.Ready -> {
-                deliver(owner, now, claim, runtime, projection)
+                is WireProjectionResult.Ready -> {
+                    deliver(owner, claimStartedAt, claim, runtime, retryBounds, projection)
+                }
             }
+        } catch (cancelled: CancellationException) {
+            containCancellation(owner, claim, claimStartedAt)
+            throw cancelled
+        } catch (_: Exception) {
+            containFailure(owner, claimStartedAt, claim, retryBounds)
+        } finally {
+            scheduleNextSafely()
         }
-        scheduleNext()
         return true
     }
 
@@ -128,46 +171,70 @@ class DeliveryCoordinator(
 
     private suspend fun deliver(
         owner: String,
-        now: Long,
+        claimStartedAt: Long,
         claim: DeliveryOutboxEntity,
         runtime: RuntimeDeliverySettings,
+        retryBounds: RetryBounds,
         projection: WireProjectionResult.Ready,
     ) {
-        val bearer = (runtime.bearer as? BearerLoad.Present)?.value
-        if (bearer == null || bearer.isEmpty()) {
-            bearer?.fill('\u0000')
-            store.markPausedAuth(
-                claim.eventId,
-                owner,
-                now,
-                runtime.relevantRevision,
-                "MISSING_BEARER",
-                null,
-            )
-            return
-        }
-        val result =
-            try {
-                transport.send(runtime, bearer, projection)
-            } finally {
-                bearer.fill('\u0000')
+        when (val bearerState = runtime.bearer) {
+            is BearerLoad.Present -> {
+                val result =
+                    try {
+                        transport.send(runtime, bearerState.value, projection)
+                    } finally {
+                        bearerState.value.fill('\u0000')
+                    }
+                applyResult(owner, claimStartedAt, claim, runtime, retryBounds, result)
             }
+
+            BearerLoad.TemporaryFailure -> {
+                retry(
+                    owner,
+                    claimStartedAt,
+                    claim,
+                    retryBounds,
+                    IngestResult.RetryWait("BEARER_TEMPORARY", null),
+                )
+            }
+
+            BearerLoad.Missing,
+            null,
+            -> {
+                store.markPausedAuth(
+                    claim.eventId,
+                    owner,
+                    completionTime(claimStartedAt),
+                    runtime.relevantRevision,
+                    "MISSING_BEARER",
+                    null,
+                )
+            }
+        }
+    }
+
+    private suspend fun applyResult(
+        owner: String,
+        claimStartedAt: Long,
+        claim: DeliveryOutboxEntity,
+        runtime: RuntimeDeliverySettings,
+        retryBounds: RetryBounds,
+        result: IngestResult,
+    ) {
         when (result) {
             is IngestResult.Sent -> {
-                store.markSent(claim.eventId, owner, now, result)
+                store.markSent(claim.eventId, owner, completionTime(claimStartedAt), result)
             }
 
             is IngestResult.RetryWait -> {
-                val next = now + retryPolicy.delayMillis(claim.attemptCount.coerceAtLeast(1))
-                store.markRetryWait(claim.eventId, owner, now, next, result)
-                scheduler.ensureScheduled(next)
+                retry(owner, claimStartedAt, claim, retryBounds, result)
             }
 
             is IngestResult.PausedAuth -> {
                 store.markPausedAuth(
                     claim.eventId,
                     owner,
-                    now,
+                    completionTime(claimStartedAt),
                     runtime.relevantRevision,
                     result.code,
                     result.httpStatus,
@@ -175,17 +242,107 @@ class DeliveryCoordinator(
             }
 
             is IngestResult.Quarantined -> {
-                store.markQuarantined(claim.eventId, owner, now, result.code, result.httpStatus)
+                store.markQuarantined(
+                    claim.eventId,
+                    owner,
+                    completionTime(claimStartedAt),
+                    result.code,
+                    result.httpStatus,
+                )
             }
         }
     }
 
-    private suspend fun scheduleNext() {
-        store.nextDueAtEpochMillis()?.let(scheduler::ensureScheduled)
+    private suspend fun retry(
+        owner: String,
+        claimStartedAt: Long,
+        claim: DeliveryOutboxEntity,
+        retryBounds: RetryBounds,
+        result: IngestResult.RetryWait,
+    ) {
+        val completedAt = completionTime(claimStartedAt)
+        val next =
+            completedAt +
+                retryPolicy.delayMillis(
+                    attemptCount = claim.attemptCount.coerceAtLeast(1),
+                    initialDelayMs = retryBounds.initialMs,
+                    maximumDelayMs = retryBounds.maximumMs,
+                )
+        store.markRetryWait(claim.eventId, owner, completedAt, next, result)
+        scheduler.ensureScheduled(next)
     }
+
+    private suspend fun containFailure(
+        owner: String,
+        claimStartedAt: Long,
+        claim: DeliveryOutboxEntity,
+        retryBounds: RetryBounds,
+    ) {
+        try {
+            retry(
+                owner,
+                claimStartedAt,
+                claim,
+                retryBounds,
+                IngestResult.RetryWait("INTERNAL_DELIVERY_ERROR", null),
+            )
+        } catch (cancelled: CancellationException) {
+            containCancellation(owner, claim, claimStartedAt)
+            throw cancelled
+        } catch (_: Exception) {
+            scheduleLeaseRecovery(claim, claimStartedAt)
+        }
+    }
+
+    private fun completionTime(fallback: Long): Long = runCatching(clock).getOrDefault(fallback)
+
+    private fun scheduleLeaseRecovery(
+        claim: DeliveryOutboxEntity,
+        claimStartedAt: Long,
+    ) {
+        val leaseExpiry = claim.leaseExpiresAtEpochMillis ?: (claimStartedAt + LEASE_DURATION_MS)
+        runCatching { scheduler.ensureScheduled(leaseExpiry) }
+    }
+
+    private suspend fun containCancellation(
+        owner: String,
+        claim: DeliveryOutboxEntity,
+        claimStartedAt: Long,
+    ) {
+        withContext(NonCancellable) {
+            val completedAt = completionTime(claimStartedAt)
+            val leaseExpiry =
+                (claim.leaseExpiresAtEpochMillis ?: (claimStartedAt + LEASE_DURATION_MS)).coerceAtLeast(completedAt)
+            try {
+                store.markRetryWait(
+                    claim.eventId,
+                    owner,
+                    completedAt,
+                    leaseExpiry,
+                    IngestResult.RetryWait("WORKER_CANCELLED", null),
+                )
+                runCatching { scheduler.ensureScheduled(leaseExpiry) }
+            } catch (_: Exception) {
+                scheduleLeaseRecovery(claim, claimStartedAt)
+            }
+        }
+    }
+
+    private suspend fun scheduleNextSafely() {
+        runCatching { store.nextDueAtEpochMillis() }
+            .getOrNull()
+            ?.let { runCatching { scheduler.ensureScheduled(it) } }
+    }
+
+    private data class RetryBounds(
+        val initialMs: Long,
+        val maximumMs: Long,
+    )
 
     companion object {
         const val LEASE_DURATION_MS = 600_000L
+        private const val DEFAULT_INITIAL_BACKOFF_MS = 30_000L
+        private const val DEFAULT_MAX_BACKOFF_MS = 21_600_000L
     }
 }
 
