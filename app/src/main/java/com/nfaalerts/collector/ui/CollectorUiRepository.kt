@@ -7,6 +7,7 @@ import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.ui.settings.SettingsDraft
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface CollectorUiRepository {
@@ -20,9 +21,13 @@ interface CollectorUiRepository {
 
     suspend fun selectedSources(): List<SourceSelection>
 
-    suspend fun deliveryRows(): List<DeliveryUiRow>
+    fun deliveryRows(): Flow<List<DeliveryUiRow>>
+
+    fun diagnosticRows(): Flow<List<DiagnosticUiRow>>
 
     suspend fun deliveryEnvelope(eventId: String): String?
+
+    suspend fun exportDiagnostics(): ByteArray
 
     suspend fun saveToken(value: CharArray): TokenSaveOutcome
 

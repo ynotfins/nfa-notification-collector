@@ -57,6 +57,7 @@ fun CollectorHomeScreen(
     modifier: Modifier = Modifier,
     requestImport: () -> Unit = {},
     requestExport: () -> Unit = {},
+    requestDiagnosticsExport: () -> Unit = {},
 ) {
     var destinationName by rememberSaveable { mutableStateOf(CollectorDestination.Status.name) }
     var tokenEntryRequested by remember { mutableStateOf(false) }
@@ -123,7 +124,7 @@ fun CollectorHomeScreen(
                 }
 
                 CollectorDestination.Delivery -> {
-                    DeliveryScreen(repository, Modifier.padding(padding))
+                    DeliveryScreen(repository, requestDiagnosticsExport, Modifier.padding(padding))
                 }
 
                 CollectorDestination.Settings -> {
@@ -245,36 +246,57 @@ private fun SourcesScreen(
 @Composable
 private fun DeliveryScreen(
     repository: CollectorUiRepository,
+    requestDiagnosticsExport: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
     var privacyEventId by remember { mutableStateOf<String?>(null) }
-    var envelope by remember { mutableStateOf<String?>(null) }
-    val rows by produceState(emptyList(), repository) { value = repository.deliveryRows() }
-    Column(modifier.padding(16.dp)) {
-        Text("Recent delivery", modifier = Modifier.semantics { heading() })
-        Text("Previews are redacted. Capture records are immutable.")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(rows, key = { it.eventId }) { row ->
-                Column {
-                    Text("${row.state} · attempts ${row.attempts} · HTTP ${row.httpStatus ?: "Unknown"}")
-                    Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
-                    Text(row.redactedPreview)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    var envelope by remember { mutableStateOf<EnvelopePageState?>(null) }
+    val rows by repository.deliveryRows().collectAsStateWithLifecycle(emptyList())
+    val diagnostics by repository.diagnosticRows().collectAsStateWithLifecycle(emptyList())
+    val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
+    val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
+    LazyColumn(
+        modifier = modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { Text("Recent delivery", modifier = Modifier.semantics { heading() }) }
+        item { Text("Previews are redacted. Capture records are immutable.") }
+        items(rows, key = { it.eventId }) { row ->
+            Column {
+                Text("${row.sourceId} · ${row.packageName}")
+                Text("Captured: ${row.occurredAt}")
+                Text("${row.state} · attempts ${row.attempts} · HTTP ${row.httpStatus ?: "Unknown"}")
+                Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
+                Text(row.redactedPreview)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = { privacyEventId = row.eventId },
+                        modifier = Modifier.sizeIn(minHeight = 48.dp),
+                    ) {
+                        Text("View local envelope")
+                    }
+                    if (row.state == "RETRY_WAIT") {
                         TextButton(
-                            onClick = { privacyEventId = row.eventId },
+                            onClick = { scope.launch { repository.retry(row.eventId) } },
                             modifier = Modifier.sizeIn(minHeight = 48.dp),
-                        ) {
-                            Text("View local envelope")
-                        }
-                        if (row.state == "RETRY_WAIT") {
-                            TextButton(
-                                onClick = { scope.launch { repository.retry(row.eventId) } },
-                                modifier = Modifier.sizeIn(minHeight = 48.dp),
-                            ) { Text("Retry eligible delivery") }
-                        }
+                        ) { Text("Retry eligible delivery") }
                     }
                 }
+            }
+        }
+        item { Text("Diagnostics", modifier = Modifier.semantics { heading() }) }
+        item {
+            Button(
+                onClick = requestDiagnosticsExport,
+                modifier = Modifier.sizeIn(minHeight = 48.dp),
+            ) { Text("Export safe diagnostics") }
+        }
+        transferFeedback?.let { message -> item { Text(message) } }
+        items(diagnostics, key = { it.diagnosticId }) { row ->
+            Column {
+                Text("${row.eventCode} · ${row.createdAt}")
+                Text(row.safeDetails)
             }
         }
     }
@@ -291,18 +313,33 @@ private fun DeliveryScreen(
                 TextButton(onClick = {
                     val eventId = privacyEventId ?: return@TextButton
                     scope.launch {
-                        envelope = repository.deliveryEnvelope(eventId)
+                        envelope = repository.deliveryEnvelope(eventId)?.let(::EnvelopePageState)
                         privacyEventId = null
                     }
                 }) { Text("I understand") }
             },
         )
     }
-    envelope?.let { value ->
+    envelope?.let { state ->
         AlertDialog(
             onDismissRequest = { envelope = null },
             title = { Text("Read-only local envelope") },
-            text = { Text(value) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Envelope page ${state.currentPage + 1} / ${state.pageCount}")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            onClick = { envelope = state.previous() },
+                            enabled = state.currentPage > 0,
+                        ) { Text("Previous page") }
+                        TextButton(
+                            onClick = { envelope = state.next() },
+                            enabled = state.currentPage < state.pageCount - 1,
+                        ) { Text("Next page") }
+                    }
+                    Text(state.currentText)
+                }
+            },
             confirmButton = { TextButton(onClick = { envelope = null }) { Text("Close") } },
         )
     }
@@ -541,6 +578,43 @@ private fun SettingsScreen(
             },
         )
     }
+}
+
+private const val ENVELOPE_PAGE_CODE_POINTS = 8_192
+
+private data class EnvelopePageState(
+    private val value: String,
+    val currentPage: Int = 0,
+) {
+    private val pageBoundaries: List<Int> = value.pageBoundaries()
+    val pageCount: Int = (pageBoundaries.size - 1).coerceAtLeast(1)
+    val currentText: String
+        get() =
+            value.substring(
+                startIndex = pageBoundaries[currentPage],
+                endIndex = pageBoundaries[currentPage + 1],
+            )
+
+    fun previous(): EnvelopePageState = copy(currentPage = (currentPage - 1).coerceAtLeast(0))
+
+    fun next(): EnvelopePageState = copy(currentPage = (currentPage + 1).coerceAtMost(pageCount - 1))
+}
+
+private fun String.pageBoundaries(): List<Int> {
+    if (isEmpty()) return listOf(0, 0)
+    val boundaries = mutableListOf(0)
+    var index = 0
+    var codePointsInPage = 0
+    while (index < length) {
+        index += Character.charCount(codePointAt(index))
+        codePointsInPage += 1
+        if (codePointsInPage == ENVELOPE_PAGE_CODE_POINTS && index < length) {
+            boundaries += index
+            codePointsInPage = 0
+        }
+    }
+    boundaries += length
+    return boundaries
 }
 
 @Composable

@@ -30,6 +30,11 @@ class MainActivity : ComponentActivity() {
             uri ?: return@registerForActivityResult
             exportConfiguration(uri)
         }
+    private val exportDiagnostics =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            uri ?: return@registerForActivityResult
+            exportDiagnostics(uri)
+        }
 
     internal fun importConfiguration(uri: Uri) {
         lifecycleScope.launch {
@@ -87,6 +92,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    internal fun exportDiagnostics(uri: Uri) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val payload = uiRepository.exportDiagnostics()
+                    try {
+                        val output = contentResolver.openOutputStream(uri)
+                        if (output == null) {
+                            uiRepository.reportDiagnosticsExportFailed()
+                        } else {
+                            output.use { it.write(payload) }
+                            uiRepository.reportDiagnosticsExportSucceeded()
+                        }
+                    } finally {
+                        payload.fill(0)
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    uiRepository.reportDiagnosticsExportFailed()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         uiRepository = AppContainerUiRepository(this, (application as NfaCollectorApp).appContainer, lifecycleScope)
@@ -102,6 +132,7 @@ class MainActivity : ComponentActivity() {
                     },
                     requestImport = { importConfig.launch(arrayOf("application/json", "text/plain")) },
                     requestExport = { exportConfig.launch("collector-config.json") },
+                    requestDiagnosticsExport = { exportDiagnostics.launch("collector-diagnostics.json") },
                 )
             }
         }

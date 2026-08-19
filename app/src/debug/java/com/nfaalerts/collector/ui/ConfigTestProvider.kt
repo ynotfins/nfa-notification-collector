@@ -77,6 +77,8 @@ class ConfigTestProvider : ContentProvider() {
 
         fun output(id: String): ByteArray = files.getValue(id).readBytes()
 
+        fun outputOrNull(id: String): ByteArray? = files[id]?.takeIf(File::exists)?.readBytes()
+
         fun failWrite(id: String): Uri {
             failingWrites += id
             return uri(id)

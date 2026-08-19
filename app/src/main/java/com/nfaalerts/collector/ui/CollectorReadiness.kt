@@ -63,6 +63,7 @@ object GuidedSetup {
 
 data class DeliveryUiRow(
     val eventId: String,
+    val packageName: String,
     val sourceId: String,
     val state: String,
     val attempts: Int,
@@ -71,6 +72,13 @@ data class DeliveryUiRow(
     val serverId: String?,
     val occurredAt: Long,
     val redactedPreview: String,
+)
+
+data class DiagnosticUiRow(
+    val diagnosticId: String,
+    val createdAt: Long,
+    val eventCode: String,
+    val safeDetails: String,
 )
 
 data class CollectorUiSnapshot(

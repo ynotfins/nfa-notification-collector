@@ -15,8 +15,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.CollectorConfigRepository
+import com.nfaalerts.collector.data.DiagnosticEventEntity
+import com.nfaalerts.collector.data.NfaCollectorDatabase
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -100,6 +103,51 @@ class MainActivityConfigSafInstrumentedTest {
                     .load()
             }
             defaults.fill(0)
+            ConfigTestProvider.clear()
+        }
+    }
+
+    @Test
+    fun productionDiagnosticsExportWritesSafeJsonDocument() {
+        val database = NfaCollectorDatabase.create(context)
+        try {
+            runBlocking {
+                database.diagnosticsDao().insertFromRepository(
+                    DiagnosticEventEntity(
+                        diagnosticId = "diag-export-1",
+                        createdAtEpochMillis = 1234L,
+                        eventCode = "DELIVERY_RETRY",
+                        safeDetailsJson = """{"eventId":"event-1","errorCode":"HTTP_503"}""",
+                    ),
+                )
+            }
+
+            composeRule.activity.exportDiagnostics(ConfigTestProvider.uri("diagnostics-export"))
+
+            composeRule.waitUntil(10_000) {
+                ConfigTestProvider.outputOrNull("diagnostics-export")?.isNotEmpty() == true
+            }
+            val output = ConfigTestProvider.output("diagnostics-export").decodeToString()
+            val row =
+                Json
+                    .parseToJsonElement(output)
+                    .jsonArray
+                    .first()
+                    .jsonObject
+            assertEquals("DELIVERY_RETRY", row.getValue("eventCode").jsonPrimitive.content)
+            assertEquals(
+                "event-1",
+                row
+                    .getValue("safeDetails")
+                    .jsonObject
+                    .getValue("eventId")
+                    .jsonPrimitive
+                    .content,
+            )
+            assertTrue(!output.contains("Authorization"))
+            assertTrue(!output.contains("rawText"))
+        } finally {
+            database.close()
             ConfigTestProvider.clear()
         }
     }

@@ -275,6 +275,79 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Configuration export failed."))
         composeRule.onNodeWithText("Configuration export failed.").assertIsDisplayed()
     }
+
+    @Test
+    fun deliveryRowsUpdateLiveAndEnvelopeOpensInBoundedPagesAfterPrivacyWarning() {
+        val repository = FakeCollectorUiRepository()
+        repository.envelope = "event-envelope-" + "x".repeat(9_000) + "-tail"
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Delivery").performClick()
+        composeRule.onNodeWithText("Recent delivery").assertIsDisplayed()
+        repository.delivery.value =
+            listOf(
+                DeliveryUiRow(
+                    eventId = "event-1",
+                    packageName = "us.bnn.newsapp",
+                    sourceId = "bnn",
+                    state = "RETRY_WAIT",
+                    attempts = 2,
+                    httpStatus = 503,
+                    safeFailure = "HTTP_503",
+                    serverId = null,
+                    occurredAt = 1234L,
+                    redactedPreview = "Notification content redacted",
+                ),
+            )
+
+        composeRule.onNodeWithText("bnn · us.bnn.newsapp").assertIsDisplayed()
+        composeRule.onNodeWithText("Captured: 1234").assertIsDisplayed()
+        composeRule.onNodeWithText("Retry eligible delivery").performClick()
+        composeRule.runOnIdle { assertTrue(repository.retryCalls == listOf("event-1")) }
+        composeRule.onNodeWithText("View local envelope").performClick()
+        composeRule.onNodeWithText("Full notification content can be private.", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("I understand").performClick()
+        composeRule.onNodeWithText("Envelope page 1 / 2").assertIsDisplayed()
+        composeRule.onNodeWithText("Next page").performClick()
+        composeRule.onNodeWithText("Envelope page 2 / 2").assertIsDisplayed()
+        composeRule.onNodeWithText("-tail", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun diagnosticsListAndExportAreRenderedWithoutCapturedContentOrSecrets() {
+        val repository = FakeCollectorUiRepository()
+        var exportRequested = false
+        repository.diagnostics.value =
+            listOf(
+                DiagnosticUiRow(
+                    diagnosticId = "diag-1",
+                    createdAt = 5678L,
+                    eventCode = "DELIVERY_RETRY",
+                    safeDetails = """{"eventId":"event-1","errorCode":"HTTP_503"}""",
+                ),
+            )
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+                requestDiagnosticsExport = { exportRequested = true },
+            )
+        }
+
+        composeRule.onNodeWithText("Delivery").performClick()
+        composeRule.onNodeWithText("Diagnostics").assertIsDisplayed()
+        composeRule.onNodeWithText("DELIVERY_RETRY · 5678").assertIsDisplayed()
+        composeRule.onNodeWithText("""{"eventId":"event-1","errorCode":"HTTP_503"}""").assertIsDisplayed()
+        composeRule.onNodeWithText("Export safe diagnostics").performClick()
+        composeRule.runOnIdle { assertTrue(exportRequested) }
+    }
 }
 
 private class FakeCollectorUiRepository(
@@ -283,8 +356,13 @@ private class FakeCollectorUiRepository(
     val mutableState =
         MutableStateFlow(initial)
     override val state: StateFlow<CollectorUiSnapshot> = mutableState
+    val delivery = MutableStateFlow<List<DeliveryUiRow>>(emptyList())
+    val diagnostics = MutableStateFlow<List<DiagnosticUiRow>>(emptyList())
     var verifyCalls = 0
+    val retryCalls = mutableListOf<String>()
     var tokenOutcome = TokenSaveOutcome.Saved
+    var envelope = ""
+    var diagnosticsExport = ByteArray(0)
     var formatted =
         com.nfaalerts.collector.config
             .CollectorConfigCodec()
@@ -305,9 +383,13 @@ private class FakeCollectorUiRepository(
 
     override suspend fun selectedSources(): List<SourceSelection> = emptyList()
 
-    override suspend fun deliveryRows(): List<DeliveryUiRow> = emptyList()
+    override fun deliveryRows(): StateFlow<List<DeliveryUiRow>> = delivery
 
-    override suspend fun deliveryEnvelope(eventId: String): String? = null
+    override fun diagnosticRows(): StateFlow<List<DiagnosticUiRow>> = diagnostics
+
+    override suspend fun deliveryEnvelope(eventId: String): String? = envelope.takeIf { it.isNotEmpty() }
+
+    override suspend fun exportDiagnostics(): ByteArray = diagnosticsExport
 
     override suspend fun saveToken(value: CharArray): TokenSaveOutcome {
         value.fill('\u0000')
@@ -331,7 +413,10 @@ private class FakeCollectorUiRepository(
 
     override fun configurationFeedback(): StateFlow<String?> = feedback
 
-    override suspend fun retry(eventId: String): Boolean = false
+    override suspend fun retry(eventId: String): Boolean {
+        retryCalls += eventId
+        return true
+    }
 }
 
 private fun defaultSnapshot() =

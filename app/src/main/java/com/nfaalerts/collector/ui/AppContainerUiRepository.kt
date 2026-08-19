@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -241,20 +242,37 @@ class AppContainerUiRepository internal constructor(
 
     override suspend fun selectedSources(): List<SourceSelection> = container.sourceSelections.snapshot().selections
 
-    override suspend fun deliveryRows(): List<DeliveryUiRow> =
-        container.recentDeliveryInspection().map {
-            DeliveryUiRow(
-                eventId = it.eventId,
-                sourceId = it.sourceId,
-                state = it.state.name,
-                attempts = it.attemptCount,
-                httpStatus = it.lastHttpStatus,
-                safeFailure = it.lastErrorCode,
-                serverId = it.serverIngestId,
-                occurredAt = it.capturedAtEpochMillis,
-                redactedPreview = "Notification content redacted",
-            )
+    override fun deliveryRows() =
+        container.deliveryInspectionFlow().map { rows ->
+            rows.map {
+                DeliveryUiRow(
+                    eventId = it.eventId,
+                    packageName = it.packageName,
+                    sourceId = it.sourceId,
+                    state = it.state.name,
+                    attempts = it.attemptCount,
+                    httpStatus = it.lastHttpStatus,
+                    safeFailure = it.lastErrorCode,
+                    serverId = it.serverIngestId,
+                    occurredAt = it.capturedAtEpochMillis,
+                    redactedPreview = "Notification content redacted",
+                )
+            }
         }
+
+    override fun diagnosticRows() =
+        container.diagnosticInspectionFlow().map { rows ->
+            rows.map {
+                DiagnosticUiRow(
+                    diagnosticId = it.diagnosticId,
+                    createdAt = it.createdAtEpochMillis,
+                    eventCode = it.eventCode,
+                    safeDetails = it.safeDetailsJson,
+                )
+            }
+        }
+
+    override suspend fun exportDiagnostics(): ByteArray = container.exportDiagnosticsForUi()
 
     override suspend fun deliveryEnvelope(eventId: String): String? = container.deliveryEnvelopeForUi(eventId)
 
@@ -335,6 +353,14 @@ class AppContainerUiRepository internal constructor(
 
     fun reportExportFailed() {
         configFeedback.value = "Configuration export failed."
+    }
+
+    fun reportDiagnosticsExportSucceeded() {
+        configFeedback.value = "Diagnostics export completed."
+    }
+
+    fun reportDiagnosticsExportFailed() {
+        configFeedback.value = "Diagnostics export failed."
     }
 
     override suspend fun retry(eventId: String): Boolean = container.retryDeliveryFromUi(eventId)

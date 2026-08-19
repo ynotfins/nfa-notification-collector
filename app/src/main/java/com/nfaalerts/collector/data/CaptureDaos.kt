@@ -39,13 +39,23 @@ interface CaptureReadDao {
 
     @Query(
         """
-        SELECT c.eventId, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
+        SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
                o.lastHttpStatus, o.lastErrorCode, o.serverIngestId
         FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
         ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
         """,
     )
     suspend fun recentDeliveryInspection(limit: Int): List<DeliveryInspection>
+
+    @Query(
+        """
+        SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId
+        FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
+        ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
+        """,
+    )
+    fun recentDeliveryInspectionFlow(limit: Int): Flow<List<DeliveryInspection>>
 
     @Query(
         """
@@ -90,6 +100,7 @@ data class CollectorStatusAggregate(
 
 data class DeliveryInspection(
     val eventId: String,
+    val packageName: String,
     val sourceId: String,
     val capturedAtEpochMillis: Long,
     val state: DeliveryState,
@@ -374,6 +385,9 @@ internal abstract class DiagnosticsDao {
 
     @Query("SELECT * FROM diagnostic_events ORDER BY createdAtEpochMillis DESC, diagnosticId DESC LIMIT :limit")
     abstract suspend fun recent(limit: Int): List<DiagnosticEventEntity>
+
+    @Query("SELECT * FROM diagnostic_events ORDER BY createdAtEpochMillis DESC, diagnosticId DESC LIMIT :limit")
+    abstract fun recentFlow(limit: Int): Flow<List<DiagnosticEventEntity>>
 
     @Transaction
     open suspend fun prune(

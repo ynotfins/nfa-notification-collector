@@ -27,8 +27,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -126,6 +133,10 @@ class AppContainer(
 
     internal suspend fun recentDeliveryInspection() = database.captureReadDao().recentDeliveryInspection(100)
 
+    internal fun deliveryInspectionFlow() = database.captureReadDao().recentDeliveryInspectionFlow(100)
+
+    internal fun diagnosticInspectionFlow() = database.diagnosticsDao().recentFlow(100)
+
     internal fun collectorStatus(): Flow<CollectorStatusAggregate> = database.captureReadDao().collectorStatus()
 
     internal suspend fun deliveryEnvelopeForUi(eventId: String): String? =
@@ -138,6 +149,23 @@ class AppContainer(
     }
 
     internal suspend fun exportConfigForUi(): ByteArray = configStore.exportPayload()
+
+    internal suspend fun exportDiagnosticsForUi(): ByteArray =
+        withContext(Dispatchers.Default) {
+            val rows = database.diagnosticsDao().recent(2_000)
+            JsonArray(
+                rows.map { row ->
+                    JsonObject(
+                        mapOf(
+                            "diagnosticId" to JsonPrimitive(row.diagnosticId),
+                            "createdAt" to JsonPrimitive(row.createdAtEpochMillis),
+                            "eventCode" to JsonPrimitive(row.eventCode),
+                            "safeDetails" to row.safeDetailsElement(),
+                        ),
+                    )
+                },
+            ).toString().toByteArray(StandardCharsets.UTF_8)
+        }
 
     suspend fun recoverExpiredSending(): Int = database.deliveryDao().recoverStaleSending(clock())
 
@@ -220,3 +248,6 @@ class AppContainer(
             -> CollectorConfigCodec().defaultDocument() to false
         }
 }
+
+private fun com.nfaalerts.collector.data.DiagnosticEventEntity.safeDetailsElement(): JsonElement =
+    runCatching { Json.parseToJsonElement(safeDetailsJson) }.getOrElse { JsonPrimitive(safeDetailsJson) }
