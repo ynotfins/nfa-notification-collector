@@ -2,11 +2,14 @@ package com.nfaalerts.collector.ui
 
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.Density
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.config.ConfigValidationError
 import com.nfaalerts.collector.config.InstalledApp
@@ -200,6 +204,32 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule
             .onNodeWithText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry.")
             .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertTrue(
+                composeRule.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0,
+            )
+        }
+    }
+
+    @Test
+    fun largeFontStatusRemainsScrollableAndNavigationHasTalkBackLabels() {
+        composeRule.activity.setContent {
+            val deviceDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity.density, fontScale = 2f)) {
+                CollectorHomeScreen(
+                    repository = FakeCollectorUiRepository(),
+                    openNotificationAccessSettings = {},
+                    openBatterySettings = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Open Status").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Sources").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Delivery").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Settings").assertIsDisplayed()
+        composeRule.onNodeWithTag("status-list").performScrollToNode(hasText("Network: Unknown"))
+        composeRule.onNodeWithText("Network: Unknown").assertIsDisplayed()
     }
 
     @Test
@@ -320,6 +350,101 @@ class CollectorHomeScreenInstrumentedTest {
     }
 
     @Test
+    fun largeFontEnvelopeDialogContentIsScrollableAndActionsStayContextual() {
+        val repository = FakeCollectorUiRepository()
+        repository.envelope = "event-envelope-" + "x".repeat(9_000) + "-tail"
+        repository.delivery.value =
+            listOf(
+                DeliveryUiRow(
+                    eventId = "event-1",
+                    packageName = "us.bnn.newsapp",
+                    sourceId = "bnn",
+                    state = "RETRY_WAIT",
+                    attempts = 2,
+                    httpStatus = 503,
+                    safeFailure = "HTTP_503",
+                    serverId = null,
+                    occurredAt = 1234L,
+                    redactedPreview = "Notification content redacted",
+                ),
+            )
+        composeRule.activity.setContent {
+            val deviceDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity.density, fontScale = 2f)) {
+                CollectorHomeScreen(
+                    repository = repository,
+                    openNotificationAccessSettings = {},
+                    openBatterySettings = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Open Delivery").performClick()
+        composeRule
+            .onNodeWithTag("delivery-list")
+            .performScrollToNode(hasContentDescription("Retry delivery event-1"))
+        composeRule.onNodeWithContentDescription("Retry delivery event-1").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("delivery-list")
+            .performScrollToNode(hasContentDescription("View local envelope for event-1"))
+        composeRule.onNodeWithContentDescription("View local envelope for event-1").performClick()
+        composeRule.onNodeWithText("I understand").performClick()
+        composeRule.onNodeWithText("Next page").performClick()
+        composeRule.onNodeWithTag("envelope-dialog-list").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("envelope-dialog-list")
+            .performScrollToNode(hasText("-tail", substring = true))
+        composeRule.onNodeWithText("-tail", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Close").assertIsDisplayed()
+    }
+
+    @Test
+    fun largeFontSettingsProfileActionsStayReachableAtDeviceWidth() {
+        var importRequested = false
+        var exportRequested = false
+        composeRule.activity.setContent {
+            val deviceDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity.density, fontScale = 2f)) {
+                CollectorHomeScreen(
+                    repository = FakeCollectorUiRepository(),
+                    openNotificationAccessSettings = {},
+                    openBatterySettings = {},
+                    requestImport = { importRequested = true },
+                    requestExport = { exportRequested = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Validate only"))
+        composeRule.onNodeWithText("Validate only").assertIsDisplayed().performClick()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Save / Apply"))
+        composeRule.onNodeWithText("Save / Apply").assertIsDisplayed().performClick()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Import configuration"))
+        composeRule.onNodeWithText("Import configuration").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(importRequested) }
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Export configuration"))
+        composeRule.onNodeWithText("Export configuration").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(exportRequested) }
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasContentDescription("Select active profile tailscale"))
+        composeRule.onNodeWithContentDescription("Select active profile tailscale").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasContentDescription("Remove profile tailscale"))
+        composeRule.onNodeWithContentDescription("Remove profile tailscale").assertIsDisplayed()
+    }
+
+    @Test
     fun diagnosticsListAndExportAreRenderedWithoutCapturedContentOrSecrets() {
         val repository = FakeCollectorUiRepository()
         var exportRequested = false
@@ -350,7 +475,7 @@ class CollectorHomeScreenInstrumentedTest {
     }
 }
 
-private class FakeCollectorUiRepository(
+internal class FakeCollectorUiRepository(
     initial: CollectorUiSnapshot = defaultSnapshot(),
 ) : CollectorUiRepository {
     val mutableState =
@@ -419,7 +544,7 @@ private class FakeCollectorUiRepository(
     }
 }
 
-private fun defaultSnapshot() =
+internal fun defaultSnapshot() =
     CollectorUiSnapshot(
         readiness =
             CollectorReadiness(

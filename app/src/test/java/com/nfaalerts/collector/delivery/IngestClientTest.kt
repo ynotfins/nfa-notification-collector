@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
@@ -123,6 +124,22 @@ class IngestClientTest {
             assertEquals(IngestResult.Quarantined("MALFORMED_202", 202), classifier.classify(202, body))
         }
         assertEquals(IngestResult.RetryWait("TIMEOUT", null), classifier.networkFailure(SocketTimeoutException()))
+        assertEquals(
+            IngestResult.RetryWait("TIMEOUT", null),
+            classifier.networkFailure(java.io.IOException("wrapped", SocketTimeoutException())),
+        )
+        assertEquals(
+            IngestResult.RetryWait("TIMEOUT", null),
+            classifier.networkFailure(InterruptedIOException("timeout")),
+        )
+        assertEquals(
+            IngestResult.RetryWait("NETWORK", null),
+            classifier.networkFailure(InterruptedIOException("interrupted")),
+        )
+        assertEquals(
+            IngestResult.RetryWait("NETWORK", null),
+            classifier.networkFailure(java.io.IOException("timeout")),
+        )
         assertEquals(IngestResult.RetryWait("NETWORK", null), classifier.networkFailure(java.io.IOException()))
     }
 

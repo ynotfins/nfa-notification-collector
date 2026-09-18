@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -73,6 +74,7 @@ fun CollectorHomeScreen(
                         onClick = { destinationName = item.name },
                         icon = {},
                         label = { Text(item.name) },
+                        modifier = Modifier.semantics { contentDescription = "Open ${item.name}" },
                     )
                 }
             }
@@ -154,70 +156,76 @@ private fun StatusScreen(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Status", modifier = Modifier.semantics { heading() })
+    LazyColumn(
+        modifier = modifier.padding(16.dp).testTag("status-list"),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { Text("Status", modifier = Modifier.semantics { heading() }) }
         if (snapshot.guidedStep == GuidedSetupStep.Ready) {
-            Surface(
-                color = Color(0xFFD8F3DC),
-                contentColor = Color(0xFF176B2C),
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .testTag("collector-ready-container")
-                        .semantics { stateDescription = "Collector ready" },
-            ) {
-                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("✓", modifier = Modifier.semantics { contentDescription = "Ready status icon" })
-                    Text("Ready — required setup and local verification are complete")
+            item {
+                Surface(
+                    color = Color(0xFFD8F3DC),
+                    contentColor = Color(0xFF176B2C),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag("collector-ready-container")
+                            .semantics { stateDescription = "Collector ready" },
+                ) {
+                    Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("✓", modifier = Modifier.semantics { contentDescription = "Ready status icon" })
+                        Text("Ready — required setup and local verification are complete")
+                    }
                 }
             }
         } else {
-            Text("Setup required")
-            Text("Guided setup: ${snapshot.guidedStep}")
-            Button(
-                onClick = {
-                    if (snapshot.guidedStep == GuidedSetupStep.Verify) {
-                        scope.launch { verify() }
-                    } else {
-                        onGuidedAction(snapshot.guidedStep)
-                    }
-                },
-                modifier = Modifier.sizeIn(minHeight = 48.dp),
-            ) {
-                Text(snapshot.guidedStep.actionLabel())
+            item { Text("Setup required") }
+            item { Text("Guided setup: ${snapshot.guidedStep}") }
+            item {
+                Button(
+                    onClick = {
+                        if (snapshot.guidedStep == GuidedSetupStep.Verify) {
+                            scope.launch { verify() }
+                        } else {
+                            onGuidedAction(snapshot.guidedStep)
+                        }
+                    },
+                    modifier = Modifier.sizeIn(minHeight = 48.dp),
+                ) {
+                    Text(snapshot.guidedStep.actionLabel())
+                }
             }
-            Text(snapshot.verificationMessage)
+            item { Text(snapshot.verificationMessage) }
         }
         val access = snapshot.notificationAccessState.presentation()
-        Text("Notification access: ${access.label}")
+        item { Text("Notification access: ${access.label}") }
         if (snapshot.notificationAccessState == NotificationAccessState.Unknown) {
-            Text(access.safeExplanation)
+            item { Text(access.safeExplanation) }
         }
-        Text("Battery reliability: ${snapshot.batteryState}")
-        Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
-            Text("Open battery settings")
+        item { Text("Battery reliability: ${snapshot.batteryState}") }
+        item {
+            Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+                Text("Open battery settings")
+            }
         }
-        StatusFacts(snapshot)
+        statusFacts(snapshot)
     }
 }
 
-@Composable
-private fun StatusFacts(snapshot: CollectorUiSnapshot) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        item { Text("Endpoint: ${snapshot.endpoint}") }
-        item { Text("Selected sources: ${snapshot.selectedCount}") }
-        item { Text("Queue: ${snapshot.queueCount}") }
-        item { Text("Captured total: ${snapshot.totalCount}") }
-        snapshot.queueCountsByState.forEach { (state, count) ->
-            item { Text("${state.name}: $count") }
-        }
-        item { Text("Listener: ${snapshot.listenerState}") }
-        item { Text("Last capture: ${snapshot.lastCapture}") }
-        item { Text("Last send: ${snapshot.lastSend}") }
-        item { Text("Server received: ${snapshot.serverReceivedAt}") }
-        item { Text("Last error: ${snapshot.lastError}") }
-        item { Text("Network: ${snapshot.networkState}") }
+private fun LazyListScope.statusFacts(snapshot: CollectorUiSnapshot) {
+    item { Text("Endpoint: ${snapshot.endpoint}") }
+    item { Text("Selected sources: ${snapshot.selectedCount}") }
+    item { Text("Queue: ${snapshot.queueCount}") }
+    item { Text("Captured total: ${snapshot.totalCount}") }
+    snapshot.queueCountsByState.forEach { (state, count) ->
+        item { Text("${state.name}: $count") }
     }
+    item { Text("Listener: ${snapshot.listenerState}") }
+    item { Text("Last capture: ${snapshot.lastCapture}") }
+    item { Text("Last send: ${snapshot.lastSend}") }
+    item { Text("Server received: ${snapshot.serverReceivedAt}") }
+    item { Text("Last error: ${snapshot.lastError}") }
+    item { Text("Network: ${snapshot.networkState}") }
 }
 
 @Composable
@@ -257,7 +265,7 @@ private fun DeliveryScreen(
     val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
     val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
     LazyColumn(
-        modifier = modifier.padding(16.dp),
+        modifier = modifier.padding(16.dp).testTag("delivery-list"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { Text("Recent delivery", modifier = Modifier.semantics { heading() }) }
@@ -269,17 +277,23 @@ private fun DeliveryScreen(
                 Text("${row.state} · attempts ${row.attempts} · HTTP ${row.httpStatus ?: "Unknown"}")
                 Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
                 Text(row.redactedPreview)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
                         onClick = { privacyEventId = row.eventId },
-                        modifier = Modifier.sizeIn(minHeight = 48.dp),
+                        modifier =
+                            Modifier
+                                .sizeIn(minHeight = 48.dp)
+                                .semantics { contentDescription = "View local envelope for ${row.eventId}" },
                     ) {
                         Text("View local envelope")
                     }
                     if (row.state == "RETRY_WAIT") {
                         TextButton(
                             onClick = { scope.launch { repository.retry(row.eventId) } },
-                            modifier = Modifier.sizeIn(minHeight = 48.dp),
+                            modifier =
+                                Modifier
+                                    .sizeIn(minHeight = 48.dp)
+                                    .semantics { contentDescription = "Retry delivery ${row.eventId}" },
                         ) { Text("Retry eligible delivery") }
                     }
                 }
@@ -325,19 +339,24 @@ private fun DeliveryScreen(
             onDismissRequest = { envelope = null },
             title = { Text("Read-only local envelope") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Envelope page ${state.currentPage + 1} / ${state.pageCount}")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(
-                            onClick = { envelope = state.previous() },
-                            enabled = state.currentPage > 0,
-                        ) { Text("Previous page") }
-                        TextButton(
-                            onClick = { envelope = state.next() },
-                            enabled = state.currentPage < state.pageCount - 1,
-                        ) { Text("Next page") }
+                LazyColumn(
+                    modifier = Modifier.testTag("envelope-dialog-list"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item { Text("Envelope page ${state.currentPage + 1} / ${state.pageCount}") }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = { envelope = state.previous() },
+                                enabled = state.currentPage > 0,
+                            ) { Text("Previous page") }
+                            TextButton(
+                                onClick = { envelope = state.next() },
+                                enabled = state.currentPage < state.pageCount - 1,
+                            ) { Text("Next page") }
+                        }
                     }
-                    Text(state.currentText)
+                    item { Text(state.currentText) }
                 }
             },
             confirmButton = { TextButton(onClick = { envelope = null }) { Text("Close") } },
@@ -405,13 +424,20 @@ private fun SettingsScreen(
                         { value -> draft = draft?.updateProfile(profile.name) { it.copy(ingestPath = value) } },
                         label = { Text("Ingest path for ${profile.name}") },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { draft = draft?.copy(activeProfile = profile.name) }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            onClick = { draft = draft?.copy(activeProfile = profile.name) },
+                            modifier =
+                                Modifier.semantics {
+                                    contentDescription = "Select active profile ${profile.name}"
+                                },
+                        ) {
                             Text("Select active")
                         }
                         TextButton(
                             onClick = { draft = draft?.removeProfile(profile.name) },
                             enabled = (draft?.profiles?.size ?: 0) > 1,
+                            modifier = Modifier.semantics { contentDescription = "Remove profile ${profile.name}" },
                         ) { Text("Remove profile") }
                     }
                 }
@@ -522,7 +548,7 @@ private fun SettingsScreen(
             )
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     scope.launch {
                         val errors = repository.validateConfig(editor)
@@ -555,7 +581,7 @@ private fun SettingsScreen(
             }) { Text("Reset to approved defaults") }
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = requestImport) { Text("Import configuration") }
                 Button(onClick = requestExport) { Text("Export configuration") }
             }

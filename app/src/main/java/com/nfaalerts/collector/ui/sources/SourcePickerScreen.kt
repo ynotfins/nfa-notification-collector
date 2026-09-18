@@ -28,8 +28,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nfaalerts.collector.capture.RawTextField
@@ -89,7 +91,7 @@ fun SourcePickerScreen(
                 TextButton(
                     onClick = { editing = source },
                     modifier = Modifier.testTag("edit-source-${source.packageName}"),
-                ) { Text("Edit source") }
+                ) { Text("Edit source ${source.appLabel}") }
             }
         }
         item {
@@ -107,7 +109,13 @@ fun SourcePickerScreen(
                 Switch(
                     checked = showSystemApps,
                     onCheckedChange = { showSystemApps = it },
-                    modifier = Modifier.testTag("show-system-apps"),
+                    modifier =
+                        Modifier
+                            .testTag("show-system-apps")
+                            .semantics {
+                                contentDescription = "Show system apps switch"
+                                stateDescription = if (showSystemApps) "On" else "Off"
+                            },
                 )
             }
         }
@@ -194,49 +202,103 @@ private fun SourceEditorDialog(
         onDismissRequest = dismiss,
         title = { Text("Edit ${source.appLabel}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Enabled")
-                    Switch(enabled, { enabled = it })
-                }
-                OutlinedTextField(
-                    sourceId,
-                    { sourceId = it },
-                    label = { Text("Source ID") },
-                    modifier = Modifier.testTag("source-id-editor"),
-                )
-                if (sourceId == "bnn") {
-                    Text("Confirm this exact app is BNN before it may use the BNN contract.")
-                    Switch(bnnConfirmed, { bnnConfirmed = it }, modifier = Modifier.testTag("confirm-bnn-editor"))
-                }
-                Text("Ordered raw-text priority")
-                rawOrder.forEachIndexed { index, field ->
+            LazyColumn(
+                modifier = Modifier.testTag("source-editor-list"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(field.configValue, modifier = Modifier.weight(1f))
-                        TextButton(
-                            onClick = { rawOrder = rawOrder.move(index, index - 1) },
-                            enabled = index > 0,
-                            modifier = Modifier.testTag("raw-up-${field.configValue}"),
-                        ) { Text("Up") }
-                        TextButton(
-                            onClick = { rawOrder = rawOrder.move(index, index + 1) },
-                            enabled = index < rawOrder.lastIndex,
-                            modifier = Modifier.testTag("raw-down-${field.configValue}"),
-                        ) { Text("Down") }
-                        TextButton(
-                            onClick = { rawOrder = rawOrder - field },
-                            enabled = rawOrder.size > 1,
-                            modifier = Modifier.testTag("raw-remove-${field.configValue}"),
-                        ) { Text("Remove") }
+                        Text("Enabled")
+                        Switch(
+                            enabled,
+                            { enabled = it },
+                            modifier =
+                                Modifier.semantics {
+                                    contentDescription = "Enabled switch for ${source.appLabel}"
+                                    stateDescription = if (enabled) "On" else "Off"
+                                },
+                        )
+                    }
+                }
+                item {
+                    OutlinedTextField(
+                        sourceId,
+                        { sourceId = it },
+                        label = { Text("Source ID") },
+                        modifier = Modifier.testTag("source-id-editor"),
+                    )
+                }
+                if (sourceId == "bnn") {
+                    item { Text("Confirm this exact app is BNN before it may use the BNN contract.") }
+                    item {
+                        Switch(
+                            bnnConfirmed,
+                            { bnnConfirmed = it },
+                            modifier =
+                                Modifier
+                                    .testTag("confirm-bnn-editor")
+                                    .semantics {
+                                        contentDescription = "BNN confirmation switch for ${source.appLabel}"
+                                        stateDescription = if (bnnConfirmed) "On" else "Off"
+                                    },
+                        )
+                    }
+                }
+                item { Text("Ordered raw-text priority") }
+                rawOrder.forEachIndexed { index, field ->
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(field.configValue)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                TextButton(
+                                    onClick = { rawOrder = rawOrder.move(index, index - 1) },
+                                    enabled = index > 0,
+                                    modifier =
+                                        Modifier
+                                            .testTag("raw-up-${field.configValue}")
+                                            .semantics {
+                                                contentDescription = "Move ${field.configValue} raw-text candidate up"
+                                            },
+                                ) { Text("Up") }
+                                TextButton(
+                                    onClick = { rawOrder = rawOrder.move(index, index + 1) },
+                                    enabled = index < rawOrder.lastIndex,
+                                    modifier =
+                                        Modifier
+                                            .testTag("raw-down-${field.configValue}")
+                                            .semantics {
+                                                contentDescription =
+                                                    "Move ${field.configValue} raw-text candidate down"
+                                            },
+                                ) { Text("Down") }
+                                TextButton(
+                                    onClick = { rawOrder = rawOrder - field },
+                                    enabled = rawOrder.size > 1,
+                                    modifier =
+                                        Modifier
+                                            .testTag("raw-remove-${field.configValue}")
+                                            .semantics {
+                                                contentDescription = "Remove ${field.configValue} raw-text candidate"
+                                            },
+                                ) { Text("Remove") }
+                            }
+                        }
                     }
                 }
                 RawTextField.entries.filterNot(rawOrder::contains).forEach { field ->
-                    TextButton(
-                        onClick = { rawOrder = rawOrder + field },
-                        modifier = Modifier.testTag("raw-add-${field.configValue}"),
-                    ) { Text("Add ${field.configValue}") }
+                    item {
+                        TextButton(
+                            onClick = { rawOrder = rawOrder + field },
+                            modifier =
+                                Modifier
+                                    .testTag("raw-add-${field.configValue}")
+                                    .semantics {
+                                        contentDescription = "Add ${field.configValue} raw-text candidate"
+                                    },
+                        ) { Text("Add ${field.configValue}") }
+                    }
                 }
-                error?.let { Text(it) }
+                error?.let { item { Text(it) } }
             }
         },
         confirmButton = {
@@ -278,7 +340,13 @@ private fun SourcePickerRow(
         Checkbox(
             checked = selected,
             onCheckedChange = { onToggle() },
-            modifier = Modifier.testTag("source-toggle-${app.packageName}"),
+            modifier =
+                Modifier
+                    .testTag("source-toggle-${app.packageName}")
+                    .semantics {
+                        contentDescription = "${if (selected) "Deselect" else "Select"} ${app.label} source"
+                        stateDescription = if (selected) "Selected" else "Not selected"
+                    },
         )
     }
 }

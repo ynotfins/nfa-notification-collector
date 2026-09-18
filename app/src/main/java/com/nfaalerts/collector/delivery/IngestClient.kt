@@ -15,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import okio.Buffer
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.time.OffsetDateTime
@@ -84,7 +85,7 @@ class IngestResponseClassifier {
         }
 
     fun networkFailure(failure: IOException): IngestResult =
-        if (failure is SocketTimeoutException) {
+        if (failure.isTimeoutFailure()) {
             IngestResult.RetryWait("TIMEOUT", null)
         } else {
             IngestResult.RetryWait("NETWORK", null)
@@ -109,6 +110,18 @@ class IngestResponseClassifier {
     }
 
     private fun malformed() = IngestResult.Quarantined("MALFORMED_202", 202)
+
+    private fun Throwable.isTimeoutFailure(): Boolean {
+        var current: Throwable? = this
+        while (current != null) {
+            if (current is SocketTimeoutException) return true
+            if (current is InterruptedIOException && current.message?.contains("timeout", ignoreCase = true) == true) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
+    }
 }
 
 class OkHttpIngestClient(

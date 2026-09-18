@@ -4,8 +4,11 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.Density
 import androidx.core.graphics.drawable.toBitmap
 import com.nfaalerts.collector.MainActivity
 import com.nfaalerts.collector.capture.RawTextField
@@ -46,6 +50,7 @@ class SourcePickerScreenInstrumentedTest {
         composeRule.onNodeWithText("Alpha User").assertIsDisplayed()
         composeRule.onNodeWithText("com.user.alpha").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Alpha User icon").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Show system apps switch").assertIsDisplayed()
         composeRule.onNodeWithText("Beta System").assertDoesNotExist()
         val alphaY =
             composeRule
@@ -61,6 +66,7 @@ class SourcePickerScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("show-system-apps").performClick()
         composeRule.onNodeWithText("Beta System").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Select Beta System source").assertIsDisplayed()
         composeRule.onNodeWithTag("source-toggle-com.system.beta").performClick()
         composeRule.waitUntil {
             repository.selections.value.packageNames
@@ -139,6 +145,9 @@ class SourcePickerScreenInstrumentedTest {
         composeRule.onNodeWithTag("source-id-editor").performTextClearance()
         composeRule.onNodeWithText("Save source").performClick()
 
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasText("Source is invalid. Check every field and raw-text priority."))
         composeRule.onNodeWithText("Source is invalid. Check every field and raw-text priority.").assertIsDisplayed()
         composeRule.onNodeWithText("Edit Alpha User").assertIsDisplayed()
     }
@@ -150,9 +159,19 @@ class SourcePickerScreenInstrumentedTest {
         setPicker(listOf(app("com.user.alpha", "Alpha User")), repository)
 
         composeRule.onNodeWithTag("edit-source-com.user.alpha").performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasTestTag("raw-remove-textLines"))
         composeRule.onNodeWithTag("raw-remove-textLines").performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasTestTag("raw-add-textLines"))
         composeRule.onNodeWithTag("raw-add-textLines").performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasTestTag("raw-up-textLines"))
         composeRule.onNodeWithTag("raw-up-textLines").performClick()
+        composeRule.onNodeWithText("Save source").assertIsDisplayed()
         composeRule.onNodeWithText("Save source").performClick()
 
         composeRule.waitUntil {
@@ -162,6 +181,70 @@ class SourcePickerScreenInstrumentedTest {
                 listOf(RawTextField.BIG_TEXT, RawTextField.TEXT, RawTextField.TEXT_LINES, RawTextField.TICKER)
         }
         composeRule.onNodeWithText("Raw priority: bigText, text, textLines, ticker").assertIsDisplayed()
+    }
+
+    @Test
+    fun sourceEditorDialogSupportsLargeFontAndRowSpecificTalkBackLabels() {
+        val repository = SourceSelectionRepository(MemoryStore())
+        runBlocking {
+            repository.upsert(
+                selection("com.example.bnn", "BNN").copy(
+                    sourceId = "bnn",
+                    bnnMappingConfirmed = true,
+                    rawTextOrder = listOf(RawTextField.TEXT, RawTextField.BIG_TEXT, RawTextField.TICKER),
+                ),
+            )
+        }
+        val apps = listOf(app("com.example.bnn", "BNN"))
+        composeRule.activity.setContent {
+            val deviceDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(deviceDensity.density, fontScale = 2f)) {
+                SourcePickerScreen(
+                    apps = apps,
+                    repository = repository,
+                    sourceIdForPackage = { "bnn" },
+                )
+            }
+        }
+
+        composeRule.waitUntil {
+            repository.selections.value.packageNames
+                .contains("com.example.bnn")
+        }
+        composeRule.onNodeWithTag("edit-source-com.example.bnn").performClick()
+        composeRule.onNodeWithTag("source-editor-list").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Enabled switch for BNN").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("BNN confirmation switch for BNN").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasContentDescription("Add textLines raw-text candidate"))
+        composeRule
+            .onNodeWithContentDescription("Add textLines raw-text candidate")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasContentDescription("Remove bigText raw-text candidate"))
+        composeRule.onNodeWithContentDescription("Remove bigText raw-text candidate").assertIsDisplayed()
+        composeRule
+            .onNodeWithContentDescription("Move bigText raw-text candidate up")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasContentDescription("Move bigText raw-text candidate down"))
+        composeRule
+            .onNodeWithContentDescription("Move bigText raw-text candidate down")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule
+            .onNodeWithTag("source-editor-list")
+            .performScrollToNode(hasContentDescription("Remove bigText raw-text candidate"))
+        composeRule
+            .onNodeWithContentDescription("Remove bigText raw-text candidate")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.onNodeWithText("Save source").assertIsDisplayed()
     }
 
     private fun setPicker(
