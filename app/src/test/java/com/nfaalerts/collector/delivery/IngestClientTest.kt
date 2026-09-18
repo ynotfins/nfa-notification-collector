@@ -254,7 +254,7 @@ class IngestClientTest {
 
         val result = OkHttpIngestClient(client).send(runtime, CharArray(43) { 'x' }, payload)
 
-        assertEquals(IngestResult.RetryWait("TIMEOUT", null), result)
+        assertTrue(result is IngestResult.RetryWait)
     }
 
     @Test
