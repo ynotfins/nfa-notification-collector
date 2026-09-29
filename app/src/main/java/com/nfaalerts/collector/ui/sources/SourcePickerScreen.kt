@@ -32,7 +32,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nfaalerts.collector.capture.RawTextField
 import com.nfaalerts.collector.config.InstalledApp
@@ -40,6 +39,7 @@ import com.nfaalerts.collector.config.InstalledAppClassifier
 import com.nfaalerts.collector.config.SelectionUpdate
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
+import com.nfaalerts.collector.ui.theme.RgdsTheme
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,6 +48,7 @@ fun SourcePickerScreen(
     repository: SourceSelectionRepository,
     sourceIdForPackage: (String) -> String,
     modifier: Modifier = Modifier,
+    refreshApps: () -> Unit = {},
 ) {
     val snapshot by repository.selections.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -57,16 +58,20 @@ fun SourcePickerScreen(
     var pendingBnn by remember { mutableStateOf<InstalledApp?>(null) }
     var editing by remember { mutableStateOf<SourceSelection?>(null) }
     val visible =
-        InstalledAppClassifier.visibleApps(
-            apps = apps,
-            showSystemApps = showSystemApps,
-            selectedPackages = snapshot.packageNames,
-            query = query,
-        )
+        InstalledAppClassifier
+            .visibleApps(
+                apps = apps,
+                showSystemApps = showSystemApps,
+                selectedPackages = snapshot.packageNames,
+                query = query,
+            ).sortedWith(
+                compareBy<InstalledApp> { it.packageName != BNN_PACKAGE_NAME }
+                    .thenBy { it.label.lowercase() },
+            )
 
     LazyColumn(
-        modifier = modifier.padding(16.dp).testTag("sources-list"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier.padding(RgdsTheme.spacing.md).testTag("sources-list"),
+        verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xs),
     ) {
         item {
             Text(
@@ -77,13 +82,22 @@ fun SourcePickerScreen(
         item { Text("${snapshot.selections.size} / 10") }
         item {
             Text(
-                "Non-BNN sources are captured locally as BLOCKED_CONTRACT until the gateway contract is approved.",
+                "Tip: BNN is listed first. Non-BNN sources are captured locally as BLOCKED_CONTRACT until " +
+                    "the gateway contract approves their source IDs.",
             )
+        }
+        item {
+            Button(onClick = refreshApps) {
+                Text("Refresh app list")
+            }
+        }
+        if (apps.isEmpty()) {
+            item { Text("No installed apps loaded. Tap Refresh app list; an empty picker is not a valid ready state.") }
         }
         mutationError?.let { message -> item { Text(message) } }
         item { Text("Selected source editor") }
         items(snapshot.selections, key = { "selected-${it.packageName}" }) { source ->
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxxs)) {
                 Text(
                     "${source.appLabel} (${source.packageName}) — ${if (source.enabled) "Enabled" else "Disabled"}; ${source.sourceId}",
                 )
@@ -105,7 +119,7 @@ fun SourcePickerScreen(
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Show system apps")
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(RgdsTheme.spacing.metadataGap))
                 Switch(
                     checked = showSystemApps,
                     onCheckedChange = { showSystemApps = it },
@@ -204,7 +218,7 @@ private fun SourceEditorDialog(
         text = {
             LazyColumn(
                 modifier = Modifier.testTag("source-editor-list"),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap),
             ) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,9 +261,9 @@ private fun SourceEditorDialog(
                 item { Text("Ordered raw-text priority") }
                 rawOrder.forEachIndexed { index, field ->
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxxs)) {
                             Text(field.configValue)
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxxs)) {
                                 TextButton(
                                     onClick = { rawOrder = rawOrder.move(index, index - 1) },
                                     enabled = index > 0,
@@ -330,8 +344,12 @@ private fun SourcePickerRow(
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         app.icon?.let { image ->
-            Image(bitmap = image, contentDescription = "${app.label} icon", modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(8.dp))
+            Image(
+                bitmap = image,
+                contentDescription = "${app.label} icon",
+                modifier = Modifier.size(RgdsTheme.spacing.iconXl),
+            )
+            Spacer(Modifier.width(RgdsTheme.spacing.metadataGap))
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(app.label)
@@ -368,6 +386,8 @@ private fun List<RawTextField>.move(
     if (from !in indices || to !in indices) return this
     return toMutableList().apply { add(to, removeAt(from)) }
 }
+
+private const val BNN_PACKAGE_NAME = "us.bnn.newsapp"
 
 private fun InstalledApp.selection(
     sourceId: String,

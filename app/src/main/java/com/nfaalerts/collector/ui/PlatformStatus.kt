@@ -1,10 +1,13 @@
 package com.nfaalerts.collector.ui
 
+import android.Manifest
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -16,6 +19,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.merge
 
@@ -36,6 +40,25 @@ enum class BatteryOptimizationState {
     Optimized,
     Unknown,
 }
+
+enum class ForegroundNotificationState {
+    Granted,
+    Required,
+    NotRequired,
+    Unknown,
+}
+
+enum class BackgroundActivityState {
+    Allowed,
+    Restricted,
+    Unknown,
+}
+
+data class ReliabilityPlatformState(
+    val battery: BatteryOptimizationState,
+    val foregroundNotification: ForegroundNotificationState,
+    val backgroundActivity: BackgroundActivityState,
+)
 
 internal enum class PlatformRegistrationKind {
     Connectivity,
@@ -89,6 +112,10 @@ internal interface PlatformStatusSource {
 
     fun batteryOptimization(): BatteryOptimizationState
 
+    fun foregroundNotification(): ForegroundNotificationState = ForegroundNotificationState.Unknown
+
+    fun backgroundActivity(): BackgroundActivityState = BackgroundActivityState.Unknown
+
     fun connectivityChanges(): Flow<ConnectivityState>
 
     fun batteryChanges(): Flow<BatteryOptimizationState>
@@ -99,9 +126,19 @@ internal class ResumablePlatformState(
 ) {
     val notificationAccess = MutableStateFlow(source.notificationAccess())
     private val batteryRefresh = MutableStateFlow(source.batteryOptimization())
+    private val foregroundNotification = MutableStateFlow(source.foregroundNotification())
+    private val backgroundActivity = MutableStateFlow(source.backgroundActivity())
     val connectivity: Flow<ConnectivityState> = source.connectivityChanges().distinctUntilChanged()
     val battery: Flow<BatteryOptimizationState> =
         merge(batteryRefresh, source.batteryChanges()).distinctUntilChanged()
+    val reliability: Flow<ReliabilityPlatformState> =
+        combine(
+            battery,
+            foregroundNotification,
+            backgroundActivity,
+        ) { batteryState, notificationState, backgroundState ->
+            ReliabilityPlatformState(batteryState, notificationState, backgroundState)
+        }.distinctUntilChanged()
     val sourceType: String = source::class.java.name
     var refreshCount: Long = 0
         private set
@@ -109,6 +146,8 @@ internal class ResumablePlatformState(
     fun refresh() {
         notificationAccess.value = source.notificationAccess()
         batteryRefresh.value = source.batteryOptimization()
+        foregroundNotification.value = source.foregroundNotification()
+        backgroundActivity.value = source.backgroundActivity()
         refreshCount += 1
     }
 }
@@ -142,6 +181,7 @@ internal class AndroidPlatformStatusSource(
     private val registrationObserver: PlatformRegistrationObserver = NoOpPlatformRegistrationObserver,
 ) : PlatformStatusSource {
     private val applicationContext = context.applicationContext
+    private val activityManager = applicationContext.getSystemService(ActivityManager::class.java)
     private val connectivityManager = applicationContext.getSystemService(ConnectivityManager::class.java)
     private val powerManager = applicationContext.getSystemService(PowerManager::class.java)
 
@@ -170,6 +210,39 @@ internal class AndroidPlatformStatusSource(
             }
         } catch (_: RuntimeException) {
             BatteryOptimizationState.Unknown
+        }
+
+    override fun foregroundNotification(): ForegroundNotificationState =
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            ForegroundNotificationState.NotRequired
+        } else {
+            try {
+                if (
+                    applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    ForegroundNotificationState.Granted
+                } else {
+                    ForegroundNotificationState.Required
+                }
+            } catch (_: RuntimeException) {
+                ForegroundNotificationState.Unknown
+            }
+        }
+
+    override fun backgroundActivity(): BackgroundActivityState =
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            BackgroundActivityState.Allowed
+        } else {
+            try {
+                if (activityManager.isBackgroundRestricted) {
+                    BackgroundActivityState.Restricted
+                } else {
+                    BackgroundActivityState.Allowed
+                }
+            } catch (_: RuntimeException) {
+                BackgroundActivityState.Unknown
+            }
         }
 
     override fun connectivityChanges(): Flow<ConnectivityState> =

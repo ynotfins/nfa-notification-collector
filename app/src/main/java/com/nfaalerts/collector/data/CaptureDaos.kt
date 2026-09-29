@@ -114,11 +114,16 @@ data class DeliveryInspection(
 abstract class DeliveryDao {
     @Query(
         """
-        SELECT eventId FROM delivery_outbox
-        WHERE state IN ('PENDING', 'RETRY_WAIT')
-          AND (nextAttemptAtEpochMillis IS NULL OR nextAttemptAtEpochMillis <= :nowEpochMillis)
-        ORDER BY COALESCE(nextAttemptAtEpochMillis, createdAtEpochMillis), createdAtEpochMillis, eventId
-        LIMIT 1
+        SELECT head.eventId FROM (
+          SELECT o.eventId, o.state, o.nextAttemptAtEpochMillis
+          FROM delivery_outbox o
+          JOIN captured_notifications c ON c.eventId = o.eventId
+          WHERE o.state IN ('PENDING', 'RETRY_WAIT', 'SENDING', 'PAUSED_AUTH')
+          ORDER BY c.postTimeEpochMillis, c.rowid
+          LIMIT 1
+        ) AS head
+        WHERE head.state IN ('PENDING', 'RETRY_WAIT')
+          AND (head.nextAttemptAtEpochMillis IS NULL OR head.nextAttemptAtEpochMillis <= :nowEpochMillis)
         """,
     )
     protected abstract suspend fun nextDueEventId(nowEpochMillis: Long): String?
@@ -267,15 +272,20 @@ abstract class DeliveryDao {
 
     @Query(
         """
-        SELECT MIN(dueAt) FROM (
-          SELECT COALESCE(nextAttemptAtEpochMillis, createdAtEpochMillis) AS dueAt
-          FROM delivery_outbox
-          WHERE state IN ('PENDING', 'RETRY_WAIT')
-          UNION ALL
-          SELECT leaseExpiresAtEpochMillis AS dueAt
-          FROM delivery_outbox
-          WHERE state = 'SENDING' AND leaseExpiresAtEpochMillis IS NOT NULL
-        )
+        SELECT CASE head.state
+          WHEN 'PENDING' THEN COALESCE(head.nextAttemptAtEpochMillis, head.createdAtEpochMillis)
+          WHEN 'RETRY_WAIT' THEN COALESCE(head.nextAttemptAtEpochMillis, head.createdAtEpochMillis)
+          WHEN 'SENDING' THEN head.leaseExpiresAtEpochMillis
+          ELSE NULL
+        END
+        FROM (
+          SELECT o.state, o.nextAttemptAtEpochMillis, o.leaseExpiresAtEpochMillis, o.createdAtEpochMillis
+          FROM delivery_outbox o
+          JOIN captured_notifications c ON c.eventId = o.eventId
+          WHERE o.state IN ('PENDING', 'RETRY_WAIT', 'SENDING', 'PAUSED_AUTH')
+          ORDER BY c.postTimeEpochMillis, c.rowid
+          LIMIT 1
+        ) AS head
         """,
     )
     abstract suspend fun nextDueAtEpochMillis(): Long?
@@ -292,6 +302,16 @@ abstract class DeliveryDao {
         eventId: String,
         nowEpochMillis: Long,
     ): Int
+
+    @Query(
+        """
+        UPDATE delivery_outbox
+        SET state = 'PENDING', nextAttemptAtEpochMillis = NULL, leaseOwner = NULL,
+            leaseExpiresAtEpochMillis = NULL, updatedAtEpochMillis = :nowEpochMillis
+        WHERE state = 'RETRY_WAIT'
+        """,
+    )
+    abstract suspend fun expediteRetryWait(nowEpochMillis: Long): Int
 }
 
 data class RetentionCandidate(

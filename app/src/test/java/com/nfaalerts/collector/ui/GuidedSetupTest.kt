@@ -21,12 +21,8 @@ class GuidedSetupTest {
             GuidedSetup.next(start.copy(true, true, true, true, 0)),
         )
         assertEquals(
-            GuidedSetupStep.Verify,
-            GuidedSetup.next(start.copy(true, true, true, true, 1)),
-        )
-        assertEquals(
             GuidedSetupStep.Ready,
-            GuidedSetup.next(start.copy(true, true, true, true, 1), verificationComplete = true),
+            GuidedSetup.next(start.copy(true, true, true, true, 1)),
         )
     }
 }

@@ -7,6 +7,13 @@ import androidx.sqlite.execSQL
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.nfaalerts.collector.config.EndpointProfile
+import com.nfaalerts.collector.delivery.BearerLoad
+import com.nfaalerts.collector.delivery.DeliveryCoordinator
+import com.nfaalerts.collector.delivery.DeliveryScheduler
+import com.nfaalerts.collector.delivery.IngestResult
+import com.nfaalerts.collector.delivery.RoomDeliveryStore
+import com.nfaalerts.collector.delivery.RuntimeDeliverySettings
 import com.nfaalerts.collector.diagnostics.DiagnosticRepository
 import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
 import kotlinx.coroutines.CompletableDeferred
@@ -16,6 +23,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -112,6 +122,92 @@ class DeliveryDatabaseInstrumentedTest {
         }
 
     @Test
+    fun orderedReplayBlocksNewerDueRowsUntilTheOldestCaptureIsDue() =
+        runBlocking {
+            database = inMemoryDatabase()
+            insert("z-oldest", DeliveryState.RETRY_WAIT, nextAttemptAt = 2_000L, capturedAt = 1L)
+            insert("a-newer", DeliveryState.PENDING, nextAttemptAt = null, capturedAt = 2L)
+
+            assertNull(database!!.deliveryDao().claimDue("worker", 1_000L, 601_000L))
+            assertEquals(
+                "z-oldest",
+                database!!.deliveryDao().claimDue("worker", 2_000L, 602_000L)?.eventId,
+            )
+        }
+
+    @Test
+    fun manualExpediteMakesTheOldestRetryImmediatelyClaimableWithoutReordering() =
+        runBlocking {
+            database = inMemoryDatabase()
+            insert("z-oldest", DeliveryState.RETRY_WAIT, nextAttemptAt = 20_000L, capturedAt = 1L)
+            insert("a-newer", DeliveryState.PENDING, nextAttemptAt = null, capturedAt = 2L)
+
+            assertEquals(1, database!!.deliveryDao().expediteRetryWait(1_000L))
+            assertEquals(
+                "z-oldest",
+                database!!.deliveryDao().claimDue("manual", 1_000L, 601_000L)?.eventId,
+            )
+        }
+
+    @Test
+    fun offlineQueueReplaysEveryCaptureInOrderWhenConnectivityReturns() =
+        runBlocking {
+            database = inMemoryDatabase()
+            insert("z-first", DeliveryState.PENDING, capturedAt = 1L)
+            insert("y-second", DeliveryState.PENDING, capturedAt = 2L)
+            insert("x-third", DeliveryState.PENDING, capturedAt = 3L)
+            var online = false
+            var now = 1_000L
+            val delivered = mutableListOf<String>()
+            val coordinator =
+                DeliveryCoordinator(
+                    store = RoomDeliveryStore(database!!),
+                    settings = {
+                        RuntimeDeliverySettings(
+                            endpoint = EndpointProfile("https://example.invalid", "/v1/ingest/alerts"),
+                            relevantRevision = 1L,
+                            bearer = BearerLoad.Present(CharArray(43) { 'x' }),
+                        )
+                    },
+                    transport = { _, _, payload ->
+                        if (!online) {
+                            IngestResult.RetryWait("NETWORK", null)
+                        } else {
+                            val metadata =
+                                Json
+                                    .parseToJsonElement(payload.bodyBytes.decodeToString())
+                                    .jsonObject
+                                    .getValue("metadata")
+                                    .jsonObject
+                            delivered += metadata.getValue("clientEventId").jsonPrimitive.content
+                            IngestResult.Sent(
+                                "123e4567-e89b-12d3-a456-426614174000",
+                                "2026-08-18T12:00:00Z",
+                            )
+                        }
+                    },
+                    scheduler =
+                        object : DeliveryScheduler {
+                            override fun ensureScheduled(dueAtEpochMillis: Long) = Unit
+                        },
+                    clock = { now },
+                )
+
+            assertEquals(1, coordinator.drainAvailable("offline"))
+            assertEquals(DeliveryState.RETRY_WAIT, database!!.captureReadDao().outbox("z-first")?.state)
+            assertEquals(DeliveryState.PENDING, database!!.captureReadDao().outbox("y-second")?.state)
+            assertEquals(DeliveryState.PENDING, database!!.captureReadDao().outbox("x-third")?.state)
+
+            online = true
+            now = 49L * 60L * 60L * 1_000L
+            assertEquals(3, coordinator.drainAvailable("online-after-49h"))
+            assertEquals(listOf("z-first", "y-second", "x-third"), delivered)
+            assertEquals(DeliveryState.SENT, database!!.captureReadDao().outbox("z-first")?.state)
+            assertEquals(DeliveryState.SENT, database!!.captureReadDao().outbox("y-second")?.state)
+            assertEquals(DeliveryState.SENT, database!!.captureReadDao().outbox("x-third")?.state)
+        }
+
+    @Test
     fun sendingLeaseIsTheNextWakeBeforeExpiryAndBecomesDueAfterRecovery() =
         runBlocking {
             database = inMemoryDatabase()
@@ -168,15 +264,24 @@ class DeliveryDatabaseInstrumentedTest {
         runBlocking {
             database = inMemoryDatabase()
             insert("stale", DeliveryState.PENDING)
-            insert("paused", DeliveryState.PENDING)
             database!!.deliveryDao().claimDue("owner", 0L, 600_000L)
-            database!!.deliveryDao().claimDue("owner", 0L, 600_000L)
-            database!!.deliveryDao().markPausedAuth("paused", "owner", 10L, 7L, 401, "HTTP_401")
 
             assertEquals(0, database!!.deliveryDao().recoverStaleSending(599_999L))
             assertEquals(1, database!!.deliveryDao().recoverStaleSending(600_001L))
-            assertEquals(0, database!!.deliveryDao().requeuePausedAuth(7L, 20L))
-            assertEquals(1, database!!.deliveryDao().requeuePausedAuth(8L, 21L))
+            assertNotNull(database!!.deliveryDao().claimDue("recovery", 600_001L, 1_200_001L))
+            database!!.deliveryDao().markSent(
+                "stale",
+                "recovery",
+                600_002L,
+                "123e4567-e89b-12d3-a456-426614174000",
+                "2026-08-18T12:00:00Z",
+            )
+
+            insert("paused", DeliveryState.PENDING, capturedAt = 1L)
+            assertNotNull(database!!.deliveryDao().claimDue("owner", 700_000L, 1_300_000L))
+            database!!.deliveryDao().markPausedAuth("paused", "owner", 700_001L, 7L, 401, "HTTP_401")
+            assertEquals(0, database!!.deliveryDao().requeuePausedAuth(7L, 700_002L))
+            assertEquals(1, database!!.deliveryDao().requeuePausedAuth(8L, 700_003L))
             assertEquals(DeliveryState.PENDING, database!!.captureReadDao().outbox("paused")?.state)
         }
 

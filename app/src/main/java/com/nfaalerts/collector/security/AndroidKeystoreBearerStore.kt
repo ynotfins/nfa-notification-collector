@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -33,6 +34,7 @@ sealed interface BearerLoadState {
     data class Present(
         val value: CharArray,
         val revision: Long,
+        val savedAtEpochMillis: Long,
     ) : BearerLoadState {
         fun clear() = value.fill('\u0000')
     }
@@ -46,6 +48,7 @@ class AndroidKeystoreBearerStore(
     context: Context,
     private val keyAlias: String = KEY_ALIAS,
     fileName: String = FILE_NAME,
+    private val clock: () -> Long = System::currentTimeMillis,
     private val beforeRead: () -> Unit = {},
 ) {
     private val file = AtomicFile(File(context.noBackupFilesDir, fileName))
@@ -62,7 +65,7 @@ class AndroidKeystoreBearerStore(
                     cipher.updateAAD(aad)
                     val ciphertext = cipher.doFinal(clearBytes)
                     try {
-                        writeEnvelope(cipher.iv, ciphertext)
+                        writeEnvelope(cipher.iv, ciphertext, clock())
                     } finally {
                         ciphertext.fill(0)
                     }
@@ -117,7 +120,16 @@ class AndroidKeystoreBearerStore(
                         cipher.init(Cipher.DECRYPT_MODE, existingKey(), GCMParameterSpec(TAG_BITS, iv))
                         cipher.updateAAD(aad)
                         clearBytes = cipher.doFinal(ciphertext)
-                        BearerLoadState.Present(decode(clearBytes), fingerprint(envelopeBytes))
+                        val savedAtEpochMillis =
+                            (envelope["savedAtEpochMillis"] as? JsonPrimitive)
+                                ?.longOrNull
+                                ?.takeIf { it >= 0L }
+                                ?: file.baseFile.lastModified().coerceAtLeast(0L)
+                        BearerLoadState.Present(
+                            value = decode(clearBytes),
+                            revision = fingerprint(envelopeBytes),
+                            savedAtEpochMillis = savedAtEpochMillis,
+                        )
                     } finally {
                         iv.fill(0)
                         ciphertext.fill(0)
@@ -203,6 +215,7 @@ class AndroidKeystoreBearerStore(
     private fun writeEnvelope(
         iv: ByteArray,
         ciphertext: ByteArray,
+        savedAtEpochMillis: Long,
     ) {
         val payload =
             JsonObject(
@@ -211,6 +224,7 @@ class AndroidKeystoreBearerStore(
                     "iv" to JsonPrimitive(Base64.encodeToString(iv, Base64.NO_WRAP)),
                     "keyAlias" to JsonPrimitive(keyAlias),
                     "purpose" to JsonPrimitive(PURPOSE),
+                    "savedAtEpochMillis" to JsonPrimitive(savedAtEpochMillis),
                     "version" to JsonPrimitive(VERSION),
                 ),
             ).toString().encodeToByteArray()

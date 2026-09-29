@@ -1,6 +1,8 @@
 package com.nfaalerts.collector
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
 import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
@@ -26,6 +28,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -48,6 +53,20 @@ class NfaCollectorApp : Application() {
         super.onCreate()
         appContainer = AppContainer(this)
         appContainer.initializeOnIo()
+        observeConnectivity()
+    }
+
+    private fun observeConnectivity() {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        runCatching {
+            manager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        appContainer.onConnectivityAvailable()
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -61,6 +80,8 @@ class AppContainer(
     internal val configStore: AtomicCollectorConfigStore = AtomicCollectorConfigStore(application.applicationContext),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mutableLastDrainAt = MutableStateFlow<Long?>(null)
+    val lastDrainAt: StateFlow<Long?> = mutableLastDrainAt.asStateFlow()
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
@@ -148,6 +169,30 @@ class AppContainer(
         return changed
     }
 
+    internal suspend fun flushDeliveryFromUi(): Int {
+        val now = clock()
+        database.deliveryDao().recoverStaleSending(now)
+        database.deliveryDao().expediteRetryWait(now)
+        deliveryScheduler.ensureScheduled(now)
+        return runDeliveryDrain("manual-$now", maximumClaims = 256)
+    }
+
+    fun onConnectivityAvailable() {
+        val now = clock()
+        deliveryScheduler.ensureScheduled(now)
+        scope.launch { runDeliveryDrain("connectivity-$now", maximumClaims = 32) }
+    }
+
+    suspend fun runDeliveryDrain(
+        owner: String,
+        maximumClaims: Int = 32,
+    ): Int =
+        try {
+            deliveryCoordinator.drainAvailable(owner, maximumClaims)
+        } finally {
+            mutableLastDrainAt.value = clock()
+        }
+
     internal suspend fun exportConfigForUi(): ByteArray = configStore.exportPayload()
 
     internal suspend fun exportDiagnosticsForUi(): ByteArray =
@@ -191,7 +236,7 @@ class AppContainer(
     private fun startImmediateDeliveryAfterPersist(eventId: String) {
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
-        scope.launch { deliveryCoordinator.drainAvailable("immediate-$eventId", maximumClaims = 1) }
+        scope.launch { runDeliveryDrain("immediate-$eventId", maximumClaims = 1) }
     }
 
     private suspend fun runtimeDeliverySettings(): RuntimeDeliverySettings {

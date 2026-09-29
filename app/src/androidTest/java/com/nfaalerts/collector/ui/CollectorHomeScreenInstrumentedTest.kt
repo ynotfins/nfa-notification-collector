@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import com.nfaalerts.collector.MainActivity
@@ -26,6 +27,7 @@ import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.config.SourceSelection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,13 +46,35 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Setup required").assertIsDisplayed()
-        composeRule.onNodeWithText("Sources").performClick()
+        composeRule.onNodeWithText("Setup health").assertIsDisplayed()
+        composeRule.onNodeWithText("Action needed").assertIsDisplayed()
+        composeRule.onNodeWithTag("status-list").performScrollToNode(hasText("Send now"))
+        composeRule.onNodeWithText("Send now").assertIsDisplayed()
+        composeRule.onNodeWithTag("status-list").performScrollToNode(hasText("Tips"))
+        composeRule.onNodeWithText("Tips").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Sources").performClick()
         composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
-        composeRule.onNodeWithText("Delivery").performClick()
-        composeRule.onNodeWithText("Recent delivery").assertIsDisplayed()
-        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithContentDescription("Open Queue").performClick()
+        composeRule.onNodeWithText("Delivery outbox").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
+    }
+
+    @Test
+    fun deliveryFlushRunsTheOrderedOutboxDrain() {
+        val repository = FakeCollectorUiRepository()
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithContentDescription("Open Queue").performClick()
+        composeRule.onNodeWithText("Flush queue now").performClick()
+        composeRule.onNodeWithText("Flush completed: 3 queue item(s) attempted in capture order.").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(1, repository.flushCalls) }
     }
 
     @Test
@@ -63,7 +87,7 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Enter token").performClick()
         composeRule.runOnIdle {
             assertTrue(
@@ -79,6 +103,53 @@ class CollectorHomeScreenInstrumentedTest {
     }
 
     @Test
+    fun tokenShowHideValidationAndSavedStateStayTruthfulAfterReopen() {
+        val repository = FakeCollectorUiRepository()
+        val syntheticToken = "a".repeat(41) + "-_"
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithText("Enter token").performClick()
+        composeRule.onNodeWithTag("bearer-token-editor").performTextInput("short")
+        composeRule.onNodeWithText("Save token").performClick()
+        composeRule.onNodeWithText("Token must be exactly 43 characters. Current length: 5.").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, repository.savedTokenLength) }
+
+        composeRule.onNodeWithTag("bearer-token-editor").performTextClearance()
+        composeRule.onNodeWithTag("bearer-token-editor").performTextInput(syntheticToken)
+        composeRule.onNodeWithText("Show token").performClick()
+        composeRule.onNodeWithTag("bearer-token-editor").assertTextContains(syntheticToken)
+        composeRule.onNodeWithText("Hide token").assertIsDisplayed()
+        composeRule.onNodeWithText("Save token").performClick()
+
+        composeRule.onNodeWithText("Token saved · last updated", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Replace token").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(43, repository.savedTokenLength) }
+
+        composeRule.activity.setContent {
+            CollectorHomeScreen(
+                repository = repository,
+                openNotificationAccessSettings = {},
+                openBatterySettings = {},
+            )
+        }
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithText("Token saved · last updated", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Replace token").performClick()
+        composeRule.onNodeWithText("Replace saved token").assertIsDisplayed()
+        composeRule.onNodeWithTag("bearer-token-editor").performTextInput("replacement-not-saved")
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.onNodeWithText("Token saved · last updated", substring = true).assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(43, repository.savedTokenLength) }
+    }
+
+    @Test
     fun statusReflectsRepositoryChangesWithoutNavigation() {
         val repository = FakeCollectorUiRepository()
         composeRule.activity.setContent {
@@ -88,17 +159,16 @@ class CollectorHomeScreenInstrumentedTest {
                 openBatterySettings = {},
             )
         }
-        composeRule.onNodeWithText("Setup required").assertIsDisplayed()
+        composeRule.onNodeWithText("Action needed").assertIsDisplayed()
 
         composeRule.runOnIdle {
             repository.mutableState.value =
-                repository.mutableState.value.copy(
-                    readiness = CollectorReadiness(true, true, true, true, 1),
-                    verificationComplete = true,
-                )
+                repository.mutableState.value.withReadiness(true, true, true, true, 1)
         }
 
-        composeRule.onNodeWithText("Ready — required setup and local verification are complete").assertIsDisplayed()
+        composeRule
+            .onNodeWithText("All required collector checks are green")
+            .assertIsDisplayed()
     }
 
     @Test
@@ -120,27 +190,26 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithText("Configure endpoint and device").performClick()
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
 
-        composeRule.onNodeWithText("Status").performClick()
+        composeRule.onNodeWithContentDescription("Open Home").performClick()
         repository.mutableState.value = repository.mutableState.value.withReadiness(true, true, false, true, 0)
         composeRule.onNodeWithText("Enter token").performClick()
-        composeRule.onNodeWithText("Secure token entry").assertIsDisplayed()
+        composeRule.onNodeWithText("Enter bearer token").assertIsDisplayed()
         composeRule.onNodeWithText("Cancel").performClick()
 
-        composeRule.onNodeWithText("Status").performClick()
+        composeRule.onNodeWithContentDescription("Open Home").performClick()
         repository.mutableState.value = repository.mutableState.value.withReadiness(true, true, true, true, 0)
         composeRule.onNodeWithText("Choose sources").performClick()
         composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
     }
 
     @Test
-    fun verifyTransitionsToTextualGreenSemanticReadyState() {
+    fun configuredRequirementsRenderTextualGreenSemanticReadyState() {
         val repository =
             FakeCollectorUiRepository(
                 initial =
-                    defaultSnapshot().copy(
-                        readiness = CollectorReadiness(true, true, true, true, 1),
-                        networkState = "Connected",
-                    ),
+                    defaultSnapshot()
+                        .withReadiness(true, true, true, true, 1)
+                        .copy(networkState = "Connected"),
             )
         composeRule.activity.setContent {
             CollectorHomeScreen(
@@ -150,15 +219,14 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Run local verification").performClick()
-
-        composeRule.onNodeWithText("Ready — required setup and local verification are complete").assertIsDisplayed()
+        composeRule
+            .onNodeWithText("All required collector checks are green")
+            .assertIsDisplayed()
         composeRule
             .onNodeWithTag("collector-ready-container")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collector ready"))
             .assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Ready status icon").assertIsDisplayed()
-        assertTrue(repository.verifyCalls == 1)
+        assertEquals(0, repository.verifyCalls)
     }
 
     @Test
@@ -179,8 +247,10 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Notification access: Unknown").assertIsDisplayed()
-        composeRule.onNodeWithText("Notification access could not be checked safely.").assertIsDisplayed()
+        composeRule.onNodeWithText("Notification access: Unknown", substring = true).assertIsDisplayed()
+        composeRule
+            .onNodeWithText("Notification access could not be checked safely.", substring = true)
+            .assertIsDisplayed()
     }
 
     @Test
@@ -195,12 +265,12 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Enter token").performClick()
-        composeRule.onNodeWithText("Bearer token").performTextInput("transient-secret")
+        composeRule.onNodeWithTag("bearer-token-editor").performTextInput("a".repeat(41) + "-_")
         composeRule.onNodeWithText("Save token").performClick()
 
-        composeRule.onNodeWithText("Secure token entry").assertDoesNotExist()
+        composeRule.onNodeWithText("Enter bearer token").assertDoesNotExist()
         composeRule
             .onNodeWithText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry.")
             .assertIsDisplayed()
@@ -224,9 +294,9 @@ class CollectorHomeScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Open Status").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Home").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Open Sources").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Open Delivery").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Queue").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Open Settings").assertIsDisplayed()
         composeRule.onNodeWithTag("status-list").performScrollToNode(hasText("Network: Unknown"))
         composeRule.onNodeWithText("Network: Unknown").assertIsDisplayed()
@@ -245,12 +315,15 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Settings").performClick()
-        composeRule.onNodeWithText("Endpoint profiles").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithText("Endpoint profile").assertIsDisplayed()
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("device-id-form"))
         composeRule.onNodeWithTag("device-id-form").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Advanced JSON…"))
+        composeRule.onNodeWithText("Advanced JSON…").performClick()
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Validate only"))
         composeRule.onNodeWithText("Validate only").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Configuration is valid."))
         composeRule.onNodeWithText("Configuration is valid.").assertIsDisplayed()
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Open notification access settings"))
         composeRule.onNodeWithText("Open notification access settings").performClick()
@@ -275,12 +348,14 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Advanced JSON…"))
+        composeRule.onNodeWithText("Advanced JSON…").performClick()
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Reset to approved defaults"))
         composeRule.onNodeWithText("Reset to approved defaults").performClick()
 
-        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("device-id-form"))
-        composeRule.onNodeWithTag("device-id-form").assertTextContains("nfa-primary-phone")
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Primary phone"))
+        composeRule.onNodeWithText("Primary phone").assertIsDisplayed()
     }
 
     @Test
@@ -293,7 +368,7 @@ class CollectorHomeScreenInstrumentedTest {
                 openBatterySettings = {},
             )
         }
-        composeRule.onNodeWithText("Settings").performClick()
+        composeRule.onNodeWithContentDescription("Open Settings").performClick()
 
         repository.feedback.value = "/: CONFIG_PAYLOAD_LIMIT — Configuration exceeds 1 MiB."
         composeRule
@@ -318,8 +393,8 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Delivery").performClick()
-        composeRule.onNodeWithText("Recent delivery").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open Queue").performClick()
+        composeRule.onNodeWithText("Delivery outbox").assertIsDisplayed()
         repository.delivery.value =
             listOf(
                 DeliveryUiRow(
@@ -379,7 +454,7 @@ class CollectorHomeScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Open Delivery").performClick()
+        composeRule.onNodeWithContentDescription("Open Queue").performClick()
         composeRule
             .onNodeWithTag("delivery-list")
             .performScrollToNode(hasContentDescription("Retry delivery event-1"))
@@ -418,6 +493,10 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule
             .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Advanced JSON…"))
+        composeRule.onNodeWithText("Advanced JSON…").performClick()
+        composeRule
+            .onNodeWithTag("settings-list")
             .performScrollToNode(hasText("Validate only"))
         composeRule.onNodeWithText("Validate only").assertIsDisplayed().performClick()
         composeRule
@@ -436,8 +515,12 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.runOnIdle { assertTrue(exportRequested) }
         composeRule
             .onNodeWithTag("settings-list")
-            .performScrollToNode(hasContentDescription("Select active profile tailscale"))
-        composeRule.onNodeWithContentDescription("Select active profile tailscale").assertIsDisplayed()
+            .performScrollToNode(hasText("Endpoint profile"))
+        composeRule.onNodeWithText("Endpoint profile").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(hasText("Custom / edit endpoint…"))
+        composeRule.onNodeWithText("Custom / edit endpoint…").performClick()
         composeRule
             .onNodeWithTag("settings-list")
             .performScrollToNode(hasContentDescription("Remove profile tailscale"))
@@ -466,7 +549,7 @@ class CollectorHomeScreenInstrumentedTest {
             )
         }
 
-        composeRule.onNodeWithText("Delivery").performClick()
+        composeRule.onNodeWithContentDescription("Open Queue").performClick()
         composeRule.onNodeWithText("Diagnostics").assertIsDisplayed()
         composeRule.onNodeWithText("DELIVERY_RETRY · 5678").assertIsDisplayed()
         composeRule.onNodeWithText("""{"eventId":"event-1","errorCode":"HTTP_503"}""").assertIsDisplayed()
@@ -484,8 +567,10 @@ internal class FakeCollectorUiRepository(
     val delivery = MutableStateFlow<List<DeliveryUiRow>>(emptyList())
     val diagnostics = MutableStateFlow<List<DiagnosticUiRow>>(emptyList())
     var verifyCalls = 0
+    var flushCalls = 0
     val retryCalls = mutableListOf<String>()
     var tokenOutcome = TokenSaveOutcome.Saved
+    var savedTokenLength: Int? = null
     var envelope = ""
     var diagnosticsExport = ByteArray(0)
     var formatted =
@@ -517,7 +602,16 @@ internal class FakeCollectorUiRepository(
     override suspend fun exportDiagnostics(): ByteArray = diagnosticsExport
 
     override suspend fun saveToken(value: CharArray): TokenSaveOutcome {
+        savedTokenLength = value.size
         value.fill('\u0000')
+        if (tokenOutcome.saved) {
+            mutableState.value =
+                mutableState.value.copy(
+                    readiness = mutableState.value.readiness.copy(bearerSaved = true),
+                    bearerSavedAtEpochMillis = 1_790_000_000_000L,
+                    bearerRevisionOk = true,
+                )
+        }
         return tokenOutcome
     }
 
@@ -541,6 +635,11 @@ internal class FakeCollectorUiRepository(
     override suspend fun retry(eventId: String): Boolean {
         retryCalls += eventId
         return true
+    }
+
+    override suspend fun flushNow(): Int {
+        flushCalls += 1
+        return 3
     }
 }
 
@@ -569,5 +668,12 @@ private fun CollectorUiSnapshot.withReadiness(
     sources: Int,
 ) = copy(
     readiness = CollectorReadiness(access, endpoint, bearer, deviceId, sources),
+    notificationAccessState = if (access) NotificationAccessState.Granted else NotificationAccessState.Required,
+    batteryState = "Unrestricted",
+    batteryOptimizationState = BatteryOptimizationState.Exempt,
+    backgroundActivityState = BackgroundActivityState.Allowed,
+    foregroundNotificationState = ForegroundNotificationState.Granted,
+    listenerState = if (access) "Connected" else "Disconnected",
+    listenerConnected = access,
     verificationComplete = false,
 )

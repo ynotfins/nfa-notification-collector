@@ -7,6 +7,20 @@ import org.junit.Test
 
 class TokenSaveCoordinatorTest {
     @Test
+    fun `token input requires one exact 43 character base64url value`() {
+        assertEquals("Paste the token before saving.", bearerValidationError(""))
+        assertEquals(
+            "Token must be exactly 43 characters. Current length: 42.",
+            bearerValidationError("a".repeat(42)),
+        )
+        assertEquals(
+            "Token may contain only letters, numbers, hyphens, and underscores.",
+            bearerValidationError("a".repeat(42) + "!"),
+        )
+        assertEquals(null, bearerValidationError("a".repeat(41) + "-_"))
+    }
+
+    @Test
     fun `saved token invalidates and refreshes revision before failed requeue`() =
         runBlocking {
             val events = mutableListOf<String>()

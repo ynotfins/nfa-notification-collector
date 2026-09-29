@@ -5,16 +5,20 @@ package com.nfaalerts.collector.capture
 import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.nfaalerts.collector.CollectorReliabilityService
 import com.nfaalerts.collector.NfaCollectorApp
+import com.nfaalerts.collector.requestCollectorListenerRebind
 
 class NfaNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         appContainer().listenerStatus.onListenerConnected()
+        CollectorReliabilityService.update(this)
     }
 
     override fun onListenerDisconnected() {
         appContainer().listenerStatus.onListenerDisconnected()
+        requestCollectorListenerRebind(this)
         super.onListenerDisconnected()
     }
 
