@@ -4,16 +4,15 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -39,6 +38,8 @@ import com.nfaalerts.collector.config.InstalledAppClassifier
 import com.nfaalerts.collector.config.SelectionUpdate
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
+import com.nfaalerts.collector.ui.RgdsCard
+import com.nfaalerts.collector.ui.RgdsEmptyState
 import com.nfaalerts.collector.ui.theme.RgdsTheme
 import kotlinx.coroutines.launch
 
@@ -49,6 +50,7 @@ fun SourcePickerScreen(
     sourceIdForPackage: (String) -> String,
     modifier: Modifier = Modifier,
     refreshApps: () -> Unit = {},
+    appsLoading: Boolean = false,
 ) {
     val snapshot by repository.selections.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -75,65 +77,134 @@ fun SourcePickerScreen(
     ) {
         item {
             Text(
-                "Sources (${snapshot.selections.size} / 10)",
+                "Notification sources",
+                style = MaterialTheme.typography.headlineLarge,
                 modifier = Modifier.semantics { heading() },
             )
         }
-        item { Text("${snapshot.selections.size} / 10") }
         item {
-            Text(
-                "Tip: BNN is listed first. Non-BNN sources are captured locally as BLOCKED_CONTRACT until " +
-                    "the gateway contract approves their source IDs.",
-            )
-        }
-        item {
-            Button(onClick = refreshApps) {
-                Text("Refresh app list")
-            }
-        }
-        if (apps.isEmpty()) {
-            item { Text("No installed apps loaded. Tap Refresh app list; an empty picker is not a valid ready state.") }
-        }
-        mutationError?.let { message -> item { Text(message) } }
-        item { Text("Selected source editor") }
-        items(snapshot.selections, key = { "selected-${it.packageName}" }) { source ->
-            Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxxs)) {
+            RgdsCard(
+                title = "Source health",
+                subtitle = "${snapshot.selections.size} of 10 selected",
+                badgeLabel = "SRC",
+            ) {
                 Text(
-                    "${source.appLabel} (${source.packageName}) — ${if (source.enabled) "Enabled" else "Disabled"}; ${source.sourceId}",
+                    "Tip: BNN is listed first. Other apps remain local as BLOCKED_CONTRACT until their " +
+                        "source IDs are approved by the PC ingest contract.",
                 )
-                Text("Raw priority: ${source.rawTextOrder.joinToString { it.configValue }}")
-                TextButton(
-                    onClick = { editing = source },
-                    modifier = Modifier.testTag("edit-source-${source.packageName}"),
-                ) { Text("Edit source ${source.appLabel}") }
+                Button(
+                    onClick = refreshApps,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) {
+                    Text("Refresh installed apps")
+                }
             }
         }
-        item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search apps") },
-                modifier = Modifier.fillMaxWidth().testTag("source-search"),
-            )
+        if (appsLoading) {
+            item {
+                RgdsEmptyState(
+                    title = "Loading installed apps",
+                    message = "The selected sources are ready while Android finishes the app list.",
+                    badgeLabel = "…",
+                )
+            }
+        } else if (apps.isEmpty()) {
+            item {
+                RgdsEmptyState(
+                    title = "No apps loaded",
+                    message = "The picker is not ready yet. Refresh instead of accepting an empty list.",
+                    badgeLabel = "0",
+                ) {
+                    Button(
+                        onClick = refreshApps,
+                        modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                    ) { Text("Try loading apps again") }
+                }
+            }
         }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Show system apps")
-                Spacer(Modifier.width(RgdsTheme.spacing.metadataGap))
-                Switch(
-                    checked = showSystemApps,
-                    onCheckedChange = { showSystemApps = it },
+        mutationError?.let { message ->
+            item {
+                RgdsCard(
+                    title = "Source change needs attention",
+                    subtitle = message,
+                    badgeLabel = "!",
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
+        item { Text("Selected sources", style = MaterialTheme.typography.headlineMedium) }
+        if (snapshot.selections.isEmpty()) {
+            item {
+                RgdsEmptyState(
+                    title = "No sources selected",
+                    message = "Select BNN below to begin durable notification capture.",
+                    badgeLabel = "0",
+                )
+            }
+        }
+        items(snapshot.selections, key = { "selected-${it.packageName}" }) { source ->
+            RgdsCard(
+                title = source.appLabel,
+                subtitle = source.packageName,
+                badgeLabel = source.sourceId,
+                containerColor =
+                    if (source.enabled) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Text("Capture: ${if (source.enabled) "On" else "Off"} · Contract source: ${source.sourceId}")
+                Text("Text priority: ${source.rawTextOrder.joinToString { it.configValue }}")
+                Button(
+                    onClick = { editing = source },
                     modifier =
                         Modifier
-                            .testTag("show-system-apps")
-                            .semantics {
-                                contentDescription = "Show system apps switch"
-                                stateDescription = if (showSystemApps) "On" else "Off"
-                            },
-                )
+                            .fillMaxWidth()
+                            .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                            .testTag("edit-source-${source.packageName}"),
+                ) { Text("Edit ${source.appLabel}") }
             }
         }
-        item { Text("Installed app picker") }
+        item {
+            RgdsCard(
+                title = "Find an app",
+                subtitle = "Search installed applications",
+                badgeLabel = "FIND",
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search apps") },
+                    modifier = Modifier.fillMaxWidth().testTag("source-search"),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show system apps", style = MaterialTheme.typography.titleMedium)
+                        Text("Tip: Selected system apps remain visible when this is off.")
+                    }
+                    Switch(
+                        checked = showSystemApps,
+                        onCheckedChange = { showSystemApps = it },
+                        modifier =
+                            Modifier
+                                .sizeIn(minHeight = RgdsTheme.spacing.touchTarget)
+                                .testTag("show-system-apps")
+                                .semantics {
+                                    contentDescription = "Show system apps switch"
+                                    stateDescription = if (showSystemApps) "On" else "Off"
+                                },
+                    )
+                }
+            }
+        }
+        item { Text("Installed apps", style = MaterialTheme.typography.headlineMedium) }
         items(visible, key = { "picker-${it.packageName}" }) { app ->
             val selected = app.packageName in snapshot.packageNames
             SourcePickerRow(
@@ -342,30 +413,52 @@ private fun SourcePickerRow(
     selected: Boolean,
     onToggle: () -> Unit,
 ) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    RgdsCard(
+        title = app.label,
+        subtitle = app.packageName,
+        badgeLabel = app.label.take(2),
+        containerColor =
+            if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        contentColor =
+            if (selected) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+    ) {
         app.icon?.let { image ->
             Image(
                 bitmap = image,
                 contentDescription = "${app.label} icon",
-                modifier = Modifier.size(RgdsTheme.spacing.iconXl),
+                modifier = Modifier.size(RgdsTheme.spacing.iconHuge),
             )
-            Spacer(Modifier.width(RgdsTheme.spacing.metadataGap))
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(app.label)
-            Text(app.packageName)
-        }
-        Checkbox(
-            checked = selected,
-            onCheckedChange = { onToggle() },
+        Text(
+            if (selected) {
+                "Selected for capture"
+            } else {
+                "Available to select"
+            },
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Button(
+            onClick = onToggle,
             modifier =
                 Modifier
+                    .fillMaxWidth()
+                    .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
                     .testTag("source-toggle-${app.packageName}")
                     .semantics {
                         contentDescription = "${if (selected) "Deselect" else "Select"} ${app.label} source"
                         stateDescription = if (selected) "Selected" else "Not selected"
                     },
-        )
+        ) {
+            Text(if (selected) "Remove source" else "Select source")
+        }
     }
 }
 

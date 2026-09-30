@@ -57,7 +57,10 @@ data class RgdsSpacing(
     val cardGap: Dp = 12.dp,
     val metadataGap: Dp = 8.dp,
     val touchTarget: Dp = 48.dp,
+    val buttonXl: Dp = 56.dp,
     val iconXl: Dp = 24.dp,
+    val iconHuge: Dp = 64.dp,
+    val cardMinHeight: Dp = 160.dp,
 )
 
 data class RgdsElevation(

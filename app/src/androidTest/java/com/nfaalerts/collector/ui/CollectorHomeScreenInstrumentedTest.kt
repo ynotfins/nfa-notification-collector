@@ -55,7 +55,7 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithContentDescription("Open Sources").performClick()
         composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Open Queue").performClick()
-        composeRule.onNodeWithText("Delivery outbox").assertIsDisplayed()
+        composeRule.onNodeWithText("Queue & delivery").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
     }
@@ -72,7 +72,7 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Queue").performClick()
-        composeRule.onNodeWithText("Flush queue now").performClick()
+        composeRule.onNodeWithText("Send queued alerts now").performClick()
         composeRule.onNodeWithText("Flush completed: 3 queue item(s) attempted in capture order.").assertIsDisplayed()
         composeRule.runOnIdle { assertEquals(1, repository.flushCalls) }
     }
@@ -325,10 +325,10 @@ class CollectorHomeScreenInstrumentedTest {
         composeRule.onNodeWithText("Validate only").performClick()
         composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Configuration is valid."))
         composeRule.onNodeWithText("Configuration is valid.").assertIsDisplayed()
-        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Open notification access settings"))
-        composeRule.onNodeWithText("Open notification access settings").performClick()
-        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Open battery settings"))
-        composeRule.onNodeWithText("Open battery settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Notification Access details"))
+        composeRule.onNodeWithText("Notification Access details").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Battery settings details"))
+        composeRule.onNodeWithText("Battery settings details").performClick()
         composeRule.runOnIdle {
             assertTrue(accessOpened)
             assertTrue(batteryOpened)
@@ -394,7 +394,7 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Queue").performClick()
-        composeRule.onNodeWithText("Delivery outbox").assertIsDisplayed()
+        composeRule.onNodeWithText("Queue & delivery").assertIsDisplayed()
         repository.delivery.value =
             listOf(
                 DeliveryUiRow(
@@ -411,11 +411,13 @@ class CollectorHomeScreenInstrumentedTest {
                 ),
             )
 
-        composeRule.onNodeWithText("bnn · us.bnn.newsapp").assertIsDisplayed()
+        composeRule.onNodeWithTag("delivery-list").performScrollToNode(hasTestTag("delivery-card-event-1"))
+        composeRule.onNodeWithText("BNN delivery").assertIsDisplayed()
+        composeRule.onNodeWithText("us.bnn.newsapp").assertIsDisplayed()
         composeRule.onNodeWithText("Captured: 1234").assertIsDisplayed()
-        composeRule.onNodeWithText("Retry eligible delivery").performClick()
+        composeRule.onNodeWithText("Retry this delivery").performClick()
         composeRule.runOnIdle { assertTrue(repository.retryCalls == listOf("event-1")) }
-        composeRule.onNodeWithText("View local envelope").performClick()
+        composeRule.onNodeWithText("View private local envelope").performClick()
         composeRule.onNodeWithText("Full notification content can be private.", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("I understand").performClick()
         composeRule.onNodeWithText("Envelope page 1 / 2").assertIsDisplayed()
@@ -550,9 +552,13 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Queue").performClick()
-        composeRule.onNodeWithText("Diagnostics").assertIsDisplayed()
-        composeRule.onNodeWithText("DELIVERY_RETRY · 5678").assertIsDisplayed()
+        composeRule.onNodeWithTag("delivery-list").performScrollToNode(hasText("Safe diagnostics"))
+        composeRule.onNodeWithText("Safe diagnostics").assertIsDisplayed()
+        composeRule.onNodeWithTag("delivery-list").performScrollToNode(hasText("DELIVERY_RETRY"))
+        composeRule.onNodeWithText("DELIVERY_RETRY").assertIsDisplayed()
+        composeRule.onNodeWithText("5678").assertIsDisplayed()
         composeRule.onNodeWithText("""{"eventId":"event-1","errorCode":"HTTP_503"}""").assertIsDisplayed()
+        composeRule.onNodeWithTag("delivery-list").performScrollToNode(hasText("Export safe diagnostics"))
         composeRule.onNodeWithText("Export safe diagnostics").performClick()
         composeRule.runOnIdle { assertTrue(exportRequested) }
     }

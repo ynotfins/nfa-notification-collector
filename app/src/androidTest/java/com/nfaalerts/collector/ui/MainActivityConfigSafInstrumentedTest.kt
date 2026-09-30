@@ -76,10 +76,12 @@ class MainActivityConfigSafInstrumentedTest {
             )
 
             composeRule.onNodeWithText("Sources").performClick()
-            composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
-            composeRule
-                .onNodeWithText("Imported Source (com.example.imported) — Enabled; other")
-                .assertIsDisplayed()
+            composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Notification sources"))
+            composeRule.onNodeWithText("Notification sources").assertIsDisplayed()
+            composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Imported Source"))
+            composeRule.onNodeWithText("Imported Source").assertIsDisplayed()
+            composeRule.onNodeWithText("com.example.imported").assertIsDisplayed()
+            composeRule.onNodeWithText("Capture: On · Contract source: other").assertIsDisplayed()
             composeRule.onNodeWithText("Settings").performClick()
 
             val oversize = ByteArray(CollectorConfigCodec.MAX_PAYLOAD_BYTES + 1) { 'x'.code.toByte() }

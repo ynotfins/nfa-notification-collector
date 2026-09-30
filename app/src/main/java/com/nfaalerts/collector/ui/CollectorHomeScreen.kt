@@ -47,9 +47,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.ui.settings.EndpointProfileDraft
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import com.nfaalerts.collector.ui.sources.SourcePickerScreen
+import com.nfaalerts.collector.ui.theme.RgdsSemanticColors
 import com.nfaalerts.collector.ui.theme.RgdsTheme
 import com.nfaalerts.collector.ui.theme.RgdsThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,7 +86,9 @@ fun CollectorHomeScreen(
                     NavigationBarItem(
                         selected = destination == item,
                         onClick = { destinationName = item.name },
-                        icon = {},
+                        icon = {
+                            RgdsCardBadge(item.label.take(1), size = spacing.iconXl)
+                        },
                         label = { Text(item.label) },
                         modifier = Modifier.semantics { contentDescription = "Open ${item.label}" },
                     )
@@ -340,27 +344,21 @@ private fun HomeTile(
     onAction: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        color = containerColor,
+    RgdsCard(
+        title = title,
+        subtitle = summary,
+        badgeLabel = title.take(2),
+        containerColor = containerColor,
         contentColor = contentColor,
-        shape = MaterialTheme.shapes.medium,
-        tonalElevation = RgdsTheme.elevation.card,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
     ) {
-        Column(
-            modifier = Modifier.padding(RgdsTheme.spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap),
-        ) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(summary, style = MaterialTheme.typography.bodyLarge)
-            Text("Tip: $tip", style = MaterialTheme.typography.bodyMedium)
-            if (actionLabel != null && onAction != null) {
-                Button(
-                    onClick = onAction,
-                    modifier = Modifier.sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
-                ) {
-                    Text(actionLabel)
-                }
+        Text("Tip: $tip", style = MaterialTheme.typography.bodyMedium)
+        if (actionLabel != null && onAction != null) {
+            Button(
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+            ) {
+                Text(actionLabel)
             }
         }
     }
@@ -383,6 +381,11 @@ private fun LazyListScope.statusFacts(snapshot: CollectorUiSnapshot) {
     item { Text("Network: ${snapshot.networkState}") }
 }
 
+private data class InstalledAppsLoad(
+    val loading: Boolean = true,
+    val apps: List<InstalledApp> = emptyList(),
+)
+
 @Composable
 private fun SourcesScreen(
     repository: CollectorUiRepository,
@@ -391,8 +394,8 @@ private fun SourcesScreen(
 ) {
     val pickerAccess = repository as? SourcePickerUiAccess
     var refreshKey by remember { mutableStateOf(0) }
-    val apps by produceState(emptyList(), pickerAccess, refreshKey) {
-        value = pickerAccess?.sourcePickerApps() ?: emptyList()
+    val appLoad by produceState(InstalledAppsLoad(), pickerAccess, refreshKey) {
+        value = InstalledAppsLoad(loading = false, apps = pickerAccess?.sourcePickerApps() ?: emptyList())
     }
     val spacing = RgdsTheme.spacing
     if (pickerAccess == null) {
@@ -402,8 +405,9 @@ private fun SourcesScreen(
         }
     } else {
         SourcePickerScreen(
-            apps = apps,
+            apps = appLoad.apps,
             repository = pickerAccess.sourceSelectionRepository,
+            appsLoading = appLoad.loading,
             sourceIdForPackage = pickerAccess::sourceIdForPackage,
             refreshApps = { refreshKey += 1 },
             modifier = modifier,
@@ -420,6 +424,7 @@ private fun DeliveryScreen(
 ) {
     val scope = rememberCoroutineScope()
     val spacing = RgdsTheme.spacing
+    val colors = RgdsTheme.colors
     var privacyEventId by remember { mutableStateOf<String?>(null) }
     var envelope by remember { mutableStateOf<EnvelopePageState?>(null) }
     var flushMessage by remember { mutableStateOf<String?>(null) }
@@ -431,77 +436,133 @@ private fun DeliveryScreen(
         modifier = modifier.padding(spacing.md).testTag("delivery-list"),
         verticalArrangement = Arrangement.spacedBy(spacing.metadataGap),
     ) {
-        item { Text("Delivery outbox", modifier = Modifier.semantics { heading() }) }
-        item { Text("Last drain: ${snapshot.lastDrain}") }
         item {
-            Button(
-                onClick = {
-                    scope.launch {
-                        val attempted = repository.flushNow()
-                        flushMessage = "Flush completed: $attempted queue item(s) attempted in capture order."
-                    }
-                },
-                modifier = Modifier.sizeIn(minHeight = RgdsTheme.spacing.touchTarget).testTag("flush-now"),
+            Text(
+                "Queue & delivery",
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        item {
+            Text(
+                "Every selected notification is written to Room first. Cards remain immutable and replay in capture order.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        item {
+            RgdsCard(
+                title = "Outbox health",
+                subtitle = "${snapshot.queueCount} waiting · ${snapshot.totalCount} captured",
+                badgeLabel = "Q",
+                containerColor = if (snapshot.queueCount > 0) colors.warningContainer else colors.successContainer,
+                contentColor =
+                    if (snapshot.queueCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
             ) {
-                Text("Flush queue now")
+                Text("Last ordered drain: ${snapshot.lastDrain}")
+                Text("Tip: Send now is safe after reconnect and never skips an older retrying row.")
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val attempted = repository.flushNow()
+                            flushMessage = "Flush completed: $attempted queue item(s) attempted in capture order."
+                        }
+                    },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                            .testTag("flush-now"),
+                ) {
+                    Text("Send queued alerts now")
+                }
+                flushMessage?.let { Text(it) }
             }
         }
-        flushMessage?.let { message -> item { Text(message) } }
-        if (rows.isNotEmpty()) {
+        if (rows.isEmpty()) {
             item {
-                Button(
-                    onClick = { privacyEventId = rows.first().eventId },
-                    modifier = Modifier.sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                RgdsEmptyState(
+                    title = "No captured notifications yet",
+                    message = "Choose BNN or another source, then wait for its next notification.",
+                    badgeLabel = "0",
                 ) {
-                    Text("Preview latest capture")
+                    Text("Tip: Preview and delivery actions appear only after Room has persisted a real capture.")
                 }
             }
         } else {
             item {
-                Text("Preview will appear after the listener persists its first selected-source notification.")
+                Button(
+                    onClick = { privacyEventId = rows.first().eventId },
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) {
+                    Text("Preview latest capture")
+                }
             }
         }
-        item { Text("Previews are redacted. Capture records are immutable.") }
         items(rows, key = { it.eventId }) { row ->
-            Column {
-                Text("${row.sourceId} · ${row.packageName}")
+            val presentation = deliveryPresentation(row.state, colors)
+            RgdsCard(
+                title = "${row.sourceId.uppercase()} delivery",
+                subtitle = row.packageName,
+                badgeLabel = presentation.badge,
+                containerColor = presentation.container,
+                contentColor = presentation.content,
+                modifier = Modifier.testTag("delivery-card-${row.eventId}"),
+            ) {
+                Text("State: ${presentation.label}", style = MaterialTheme.typography.titleMedium)
                 Text("Captured: ${row.occurredAt}")
-                Text("${row.state} · attempts ${row.attempts} · HTTP ${row.httpStatus ?: "Unknown"}")
-                Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
-                Text(row.redactedPreview)
-                Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxs)) {
+                Text("Attempts: ${row.attempts} · HTTP: ${row.httpStatus ?: "Not received"}")
+                if (row.safeFailure != null) Text("Needs attention: ${row.safeFailure}")
+                if (row.serverId != null) Text("Server receipt: ${row.serverId}")
+                if (row.state == "RETRY_WAIT") {
+                    Button(
+                        onClick = { scope.launch { repository.retry(row.eventId) } },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                                .semantics { contentDescription = "Retry delivery ${row.eventId}" },
+                    ) { Text("Retry this delivery") }
                     TextButton(
                         onClick = { privacyEventId = row.eventId },
                         modifier =
                             Modifier
+                                .fillMaxWidth()
                                 .sizeIn(minHeight = RgdsTheme.spacing.touchTarget)
                                 .semantics { contentDescription = "View local envelope for ${row.eventId}" },
-                    ) {
-                        Text("View local envelope")
-                    }
-                    if (row.state == "RETRY_WAIT") {
-                        TextButton(
-                            onClick = { scope.launch { repository.retry(row.eventId) } },
-                            modifier =
-                                Modifier
-                                    .sizeIn(minHeight = RgdsTheme.spacing.touchTarget)
-                                    .semantics { contentDescription = "Retry delivery ${row.eventId}" },
-                        ) { Text("Retry eligible delivery") }
-                    }
+                    ) { Text("View private local envelope") }
+                } else {
+                    Button(
+                        onClick = { privacyEventId = row.eventId },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                                .semantics { contentDescription = "View local envelope for ${row.eventId}" },
+                    ) { Text("View delivery details") }
                 }
             }
         }
-        item { Text("Diagnostics", modifier = Modifier.semantics { heading() }) }
+        item { Text("Safe diagnostics", modifier = Modifier.semantics { heading() }) }
         item {
-            Button(
-                onClick = requestDiagnosticsExport,
-                modifier = Modifier.sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
-            ) { Text("Export safe diagnostics") }
+            RgdsCard(
+                title = "Diagnostics export",
+                subtitle = "Secret-free health and retry evidence",
+                badgeLabel = "LOG",
+            ) {
+                Text("Tip: Diagnostics omit bearer values and private notification content.")
+                Button(
+                    onClick = requestDiagnosticsExport,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text("Export safe diagnostics") }
+                transferFeedback?.let { Text(it) }
+            }
         }
-        transferFeedback?.let { message -> item { Text(message) } }
         items(diagnostics, key = { it.diagnosticId }) { row ->
-            Column {
-                Text("${row.eventCode} · ${row.createdAt}")
+            RgdsCard(
+                title = row.eventCode,
+                subtitle = row.createdAt.toString(),
+                badgeLabel = "LOG",
+            ) {
                 Text(row.safeDetails)
             }
         }
@@ -556,6 +617,50 @@ private fun DeliveryScreen(
     }
 }
 
+private data class DeliveryPresentation(
+    val label: String,
+    val badge: String,
+    val container: androidx.compose.ui.graphics.Color,
+    val content: androidx.compose.ui.graphics.Color,
+)
+
+@Composable
+private fun deliveryPresentation(
+    state: String,
+    colors: RgdsSemanticColors,
+): DeliveryPresentation =
+    when (state) {
+        "SENT" -> {
+            DeliveryPresentation("Sent", "OK", colors.successContainer, colors.onSuccessContainer)
+        }
+
+        "PENDING", "SENDING" -> {
+            DeliveryPresentation("Waiting to send", "Q", colors.infoContainer, colors.onInfoContainer)
+        }
+
+        "RETRY_WAIT", "PAUSED_AUTH" -> {
+            DeliveryPresentation("Needs retry", "!", colors.warningContainer, colors.onWarningContainer)
+        }
+
+        "BLOCKED_CONTRACT" -> {
+            DeliveryPresentation(
+                "Saved locally — source not approved for live ingest",
+                "HOLD",
+                MaterialTheme.colorScheme.secondaryContainer,
+                MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+
+        else -> {
+            DeliveryPresentation(
+                "Needs attention",
+                "!",
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+    }
+
 @Composable
 private fun SettingsScreen(
     repository: CollectorUiRepository,
@@ -584,6 +689,28 @@ private fun SettingsScreen(
     var showAdvancedJson by rememberSaveable { mutableStateOf(false) }
     val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
     val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
+    val reliabilityAction =
+        when {
+            snapshot.notificationAccessState != NotificationAccessState.Granted -> {
+                "Fix notification access" to openNotificationAccessSettings
+            }
+
+            snapshot.batteryOptimizationState != BatteryOptimizationState.Exempt -> {
+                "Fix battery setting" to openBatterySettings
+            }
+
+            snapshot.backgroundActivityState != BackgroundActivityState.Allowed -> {
+                "Fix background setting" to openAppDetailsSettings
+            }
+
+            snapshot.foregroundNotificationState == ForegroundNotificationState.Required -> {
+                "Allow reliability notification" to requestForegroundNotificationPermission
+            }
+
+            else -> {
+                "Review reliability settings" to openBatterySettings
+            }
+        }
     LaunchedEffect(repository, snapshot.canonicalConfigRevision) {
         draft = repository.settingsDraft()
         editor = repository.formattedConfig()
@@ -630,25 +757,72 @@ private fun SettingsScreen(
                 )
             }
         }
-        item { Text(snapshot.tokenStatusLabel()) }
         item {
-            Button(
-                onClick = {
-                    tokenWarning = null
-                    tokenEntry = true
-                },
-                modifier = Modifier.sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
-            ) { Text(if (snapshot.readiness.bearerSaved) "Replace token" else "Enter token") }
+            RgdsCard(
+                title = "Ingest authentication",
+                subtitle = snapshot.tokenStatusLabel(),
+                badgeLabel = "KEY",
+                containerColor =
+                    if (snapshot.readiness.bearerSaved && snapshot.bearerRevisionOk) {
+                        RgdsTheme.colors.successContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                contentColor =
+                    if (snapshot.readiness.bearerSaved && snapshot.bearerRevisionOk) {
+                        RgdsTheme.colors.onSuccessContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
+            ) {
+                Text("Tip: The saved token is never redisplayed. Replace opens a fresh secure editor.")
+                Button(
+                    onClick = {
+                        tokenWarning = null
+                        tokenEntry = true
+                    },
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text(if (snapshot.readiness.bearerSaved) "Replace token" else "Enter token") }
+                tokenWarning?.let { Text(it) }
+            }
         }
-        tokenWarning?.let { warning -> item { Text(warning) } }
-        item { Button(onClick = openNotificationAccessSettings) { Text("Open notification access settings") } }
-        item { Button(onClick = openBatterySettings) { Text("Open battery settings") } }
-        item { Button(onClick = openAppDetailsSettings) { Text("Open app background settings") } }
-        if (snapshot.foregroundNotificationState == ForegroundNotificationState.Required) {
-            item {
-                Button(onClick = requestForegroundNotificationPermission) {
-                    Text("Allow reliability notification")
-                }
+        item {
+            RgdsCard(
+                title = "Reliability & permissions",
+                subtitle =
+                    "Access ${snapshot.notificationAccessState} · Battery ${snapshot.batteryState} · " +
+                        "Listener ${snapshot.listenerState}",
+                badgeLabel = if (snapshot.operationallyHealthy) "OK" else "!",
+                containerColor =
+                    if (snapshot.operationallyHealthy) {
+                        RgdsTheme.colors.successContainer
+                    } else {
+                        RgdsTheme.colors.warningContainer
+                    },
+                contentColor =
+                    if (snapshot.operationallyHealthy) {
+                        RgdsTheme.colors.onSuccessContainer
+                    } else {
+                        RgdsTheme.colors.onWarningContainer
+                    },
+            ) {
+                Text("Tip: Return from Android Settings and this card re-checks the real OS state automatically.")
+                Button(
+                    onClick = reliabilityAction.second,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text(reliabilityAction.first) }
+                TextButton(
+                    onClick = openNotificationAccessSettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("Notification Access details") }
+                TextButton(
+                    onClick = openBatterySettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("Battery settings details") }
+                TextButton(
+                    onClick = openAppDetailsSettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("App background details") }
             }
         }
         item {
@@ -664,8 +838,11 @@ private fun SettingsScreen(
             }
             draft?.profiles?.let { profiles ->
                 items(profiles, key = EndpointProfileDraft::name) { profile ->
-                    Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxs)) {
-                        Text("Profile: ${profile.displayName()}")
+                    RgdsCard(
+                        title = profile.displayName(),
+                        subtitle = profile.baseUrl,
+                        badgeLabel = "URL",
+                    ) {
                         OutlinedTextField(
                             profile.baseUrl,
                             { value -> draft = draft?.updateProfile(profile.name) { it.copy(baseUrl = value) } },
@@ -688,8 +865,11 @@ private fun SettingsScreen(
                 }
             }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxs)) {
-                    Text("Add custom HTTPS profile")
+                RgdsCard(
+                    title = "Add custom HTTPS profile",
+                    subtitle = "Advanced gateway configuration",
+                    badgeLabel = "NEW",
+                ) {
                     OutlinedTextField(addProfileName, { addProfileName = it }, label = { Text("Profile name") })
                     OutlinedTextField(addProfileBaseUrl, { addProfileBaseUrl = it }, label = { Text("HTTPS origin") })
                     OutlinedTextField(addProfilePath, { addProfilePath = it }, label = { Text("Ingest path") })
@@ -715,17 +895,26 @@ private fun SettingsScreen(
         }
         draft?.let { current ->
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap)) {
-                    Text("Optional: I selected Keep open in Samsung Recents")
-                    Switch(
-                        checked = current.recentsLocked,
-                        onCheckedChange = { draft = current.copy(recentsLocked = it) },
-                        modifier =
-                            Modifier.semantics {
-                                stateDescription =
-                                    if (current.recentsLocked) "Optional tip enabled" else "Optional tip disabled"
-                            },
-                    )
+                RgdsCard(
+                    title = "Samsung Recents",
+                    subtitle = "Optional convenience — never a readiness gate",
+                    badgeLabel = "OPT",
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Keep open selected", style = MaterialTheme.typography.titleMedium)
+                        Switch(
+                            checked = current.recentsLocked,
+                            onCheckedChange = { draft = current.copy(recentsLocked = it) },
+                            modifier =
+                                Modifier.semantics {
+                                    stateDescription =
+                                        if (current.recentsLocked) "Optional tip enabled" else "Optional tip disabled"
+                                },
+                        )
+                    }
                 }
             }
             item {
@@ -986,16 +1175,17 @@ private fun SettingsDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val currentLabel = options.firstOrNull { it.value == currentValue }?.label ?: currentValue
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.xxs),
+    RgdsCard(
+        title = label,
+        subtitle = currentLabel,
+        badgeLabel = label.take(2),
     ) {
-        Text(label, style = MaterialTheme.typography.titleMedium)
+        Text("Tip: $tip", style = MaterialTheme.typography.bodyMedium)
         Button(
             onClick = { expanded = true },
-            modifier = modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+            modifier = modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
         ) {
-            Text(currentLabel)
+            Text("Change $label")
         }
         DropdownMenu(
             expanded = expanded,
@@ -1011,7 +1201,6 @@ private fun SettingsDropdown(
                 )
             }
         }
-        Text("Tip: $tip", style = MaterialTheme.typography.bodySmall)
     }
 }
 

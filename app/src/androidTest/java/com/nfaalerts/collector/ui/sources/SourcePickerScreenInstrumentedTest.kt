@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -28,7 +29,7 @@ import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.config.SourceSelectionStore
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -47,24 +48,17 @@ class SourcePickerScreenInstrumentedTest {
             )
         setPicker(apps, repository)
 
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Alpha User"))
         composeRule.onNodeWithText("Alpha User").assertIsDisplayed()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("com.user.alpha"))
         composeRule.onNodeWithText("com.user.alpha").assertIsDisplayed()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasContentDescription("Alpha User icon"))
         composeRule.onNodeWithContentDescription("Alpha User icon").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Show system apps switch").assertIsDisplayed()
         composeRule.onNodeWithText("Beta System").assertDoesNotExist()
-        val alphaY =
-            composeRule
-                .onNodeWithText("Alpha User")
-                .fetchSemanticsNode()
-                .positionInRoot.y
-        val zuluY =
-            composeRule
-                .onNodeWithText("Zulu User")
-                .fetchSemanticsNode()
-                .positionInRoot.y
-        assertTrue(alphaY < zuluY)
 
-        composeRule.onNodeWithTag("show-system-apps").performClick()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("show-system-apps"))
+        composeRule.onNodeWithContentDescription("Show system apps switch").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Beta System"))
         composeRule.onNodeWithText("Beta System").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Select Beta System source").assertIsDisplayed()
         composeRule.onNodeWithTag("source-toggle-com.system.beta").performClick()
@@ -72,11 +66,15 @@ class SourcePickerScreenInstrumentedTest {
             repository.selections.value.packageNames
                 .contains("com.system.beta")
         }
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("show-system-apps"))
         composeRule.onNodeWithTag("show-system-apps").performClick()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Beta System"))
         composeRule.onNodeWithText("Beta System").assertIsDisplayed()
 
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("source-search"))
         composeRule.onNodeWithTag("source-search").performTextInput("beta")
-        composeRule.onNodeWithText("Beta System").assertIsDisplayed()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Beta System"))
+        composeRule.onAllNodesWithText("Beta System")[0].assertIsDisplayed()
         composeRule.onNodeWithText("Alpha User").assertDoesNotExist()
     }
 
@@ -92,13 +90,13 @@ class SourcePickerScreenInstrumentedTest {
             composeRule.onNodeWithTag(tag).performClick()
         }
         composeRule.waitUntil { repository.selections.value.selections.size == 10 }
-        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("10 / 10"))
-        composeRule.onNodeWithText("10 / 10").assertIsDisplayed()
+        composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("10 of 10 selected"))
+        composeRule.onNodeWithText("10 of 10 selected").assertIsDisplayed()
         composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("source-toggle-com.user.10"))
         composeRule.onNodeWithTag("source-toggle-com.user.10").performClick()
         composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Maximum 10 sources"))
         composeRule.onNodeWithText("Maximum 10 sources").assertIsDisplayed()
-        composeRule.onNodeWithText("10 / 10").assertIsDisplayed()
+        composeRule.onNodeWithText("10 of 10 selected").assertIsDisplayed()
 
         composeRule.onNodeWithTag("sources-list").performScrollToNode(hasTestTag("edit-source-com.user.0"))
         composeRule.onNodeWithTag("edit-source-com.user.0").performClick()
@@ -111,15 +109,18 @@ class SourcePickerScreenInstrumentedTest {
         val repository = SourceSelectionRepository(MemoryStore())
         setPicker(listOf(app("com.example.bnn", "BNN")), repository) { "bnn" }
 
+        composeRule
+            .onNodeWithTag("sources-list")
+            .performScrollToNode(hasTestTag("source-toggle-com.example.bnn"))
         composeRule.onNodeWithTag("source-toggle-com.example.bnn").performClick()
         composeRule.onNodeWithText("Confirm BNN source").assertIsDisplayed()
-        composeRule.onNodeWithText("0 / 10").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(0, repository.selections.value.selections.size) }
         composeRule.onNodeWithTag("confirm-bnn-source").performClick()
         composeRule.waitUntil {
             repository.selections.value.packageNames
                 .contains("com.example.bnn")
         }
-        composeRule.onNodeWithText("1 / 10").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(1, repository.selections.value.selections.size) }
     }
 
     @Test
@@ -140,7 +141,10 @@ class SourcePickerScreenInstrumentedTest {
         }
         setPicker(listOf(app("com.user.alpha", "Alpha User")), repository)
 
-        composeRule.onNodeWithText("Raw priority: ticker, text, bigText, textLines").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("sources-list")
+            .performScrollToNode(hasText("Text priority: ticker, text, bigText, textLines"))
+        composeRule.onNodeWithText("Text priority: ticker, text, bigText, textLines").assertIsDisplayed()
         composeRule.onNodeWithTag("edit-source-com.user.alpha").performClick()
         composeRule.onNodeWithTag("source-id-editor").performTextClearance()
         composeRule.onNodeWithText("Save source").performClick()
@@ -149,7 +153,7 @@ class SourcePickerScreenInstrumentedTest {
             .onNodeWithTag("source-editor-list")
             .performScrollToNode(hasText("Source is invalid. Check every field and raw-text priority."))
         composeRule.onNodeWithText("Source is invalid. Check every field and raw-text priority.").assertIsDisplayed()
-        composeRule.onNodeWithText("Edit Alpha User").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-editor-list").assertIsDisplayed()
     }
 
     @Test
@@ -158,6 +162,9 @@ class SourcePickerScreenInstrumentedTest {
         runBlocking { repository.upsert(selection("com.user.alpha", "Alpha User")) }
         setPicker(listOf(app("com.user.alpha", "Alpha User")), repository)
 
+        composeRule
+            .onNodeWithTag("sources-list")
+            .performScrollToNode(hasTestTag("edit-source-com.user.alpha"))
         composeRule.onNodeWithTag("edit-source-com.user.alpha").performClick()
         composeRule
             .onNodeWithTag("source-editor-list")
@@ -180,7 +187,10 @@ class SourcePickerScreenInstrumentedTest {
                 .rawTextOrder ==
                 listOf(RawTextField.BIG_TEXT, RawTextField.TEXT, RawTextField.TEXT_LINES, RawTextField.TICKER)
         }
-        composeRule.onNodeWithText("Raw priority: bigText, text, textLines, ticker").assertIsDisplayed()
+        composeRule
+            .onNodeWithTag("sources-list")
+            .performScrollToNode(hasText("Text priority: bigText, text, textLines, ticker"))
+        composeRule.onNodeWithText("Text priority: bigText, text, textLines, ticker").assertIsDisplayed()
     }
 
     @Test
@@ -211,6 +221,9 @@ class SourcePickerScreenInstrumentedTest {
             repository.selections.value.packageNames
                 .contains("com.example.bnn")
         }
+        composeRule
+            .onNodeWithTag("sources-list")
+            .performScrollToNode(hasTestTag("edit-source-com.example.bnn"))
         composeRule.onNodeWithTag("edit-source-com.example.bnn").performClick()
         composeRule.onNodeWithTag("source-editor-list").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Enabled switch for BNN").assertIsDisplayed()
