@@ -558,12 +558,12 @@ class CollectorConfigCodec {
         result["delivery"] = mergeKnownObject(defaultDelivery, result["delivery"])
         result["retention"] =
             mergeKnownObject(
-                JsonObject(mapOf("maxSentRows" to JsonPrimitive(10_000), "sentDays" to JsonPrimitive(90))),
+                JsonObject(mapOf("maxSentRows" to JsonPrimitive(100_000), "sentDays" to JsonPrimitive(180))),
                 result["retention"],
             )
         result["diagnostics"] =
             mergeKnownObject(
-                JsonObject(mapOf("maxRows" to JsonPrimitive(2_000), "retentionDays" to JsonPrimitive(14))),
+                JsonObject(mapOf("maxRows" to JsonPrimitive(50_000), "retentionDays" to JsonPrimitive(90))),
                 result["diagnostics"],
             )
         result["reliability"] =

@@ -54,6 +54,7 @@ import com.nfaalerts.collector.ui.sources.SourcePickerScreen
 import com.nfaalerts.collector.ui.theme.RgdsSemanticColors
 import com.nfaalerts.collector.ui.theme.RgdsTheme
 import com.nfaalerts.collector.ui.theme.RgdsThemeMode
+import com.nfaalerts.collector.data.DeliveryState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -185,8 +186,8 @@ private fun StatusScreen(
     var flushMessage by remember { mutableStateOf<String?>(null) }
     val access = snapshot.notificationAccessState.presentation()
     val setupFacts =
-        "Notification access: ${access.label}. Battery: ${snapshot.batteryState}. " +
-            "Background: ${snapshot.backgroundActivityState}. Reliability notification: " +
+        "Notification access: ${snapshot.notificationAccessLabel}. Battery: ${snapshot.batteryState}. " +
+            "Background: ${snapshot.backgroundActivityLabel}. Reliability notification: " +
             "${snapshot.foregroundNotificationState}. Listener: ${snapshot.listenerState}. " +
             if (snapshot.notificationAccessState == NotificationAccessState.Unknown) access.safeExplanation else ""
     val setupAction =
@@ -271,14 +272,21 @@ private fun StatusScreen(
         item {
             HomeTile(
                 title = "Queue",
-                summary = "${snapshot.queueCount} not sent · ${snapshot.totalCount} captured",
+                summary =
+                    if (snapshot.sendableCount > 0) {
+                        "${snapshot.sendableCount} sending soon · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    } else if (snapshot.heldCount > 0) {
+                        "0 sending · ${snapshot.heldCount} held (not a send backlog) · ${snapshot.totalCount} captured"
+                    } else {
+                        "Caught up · ${snapshot.totalCount} captured"
+                    },
                 tip =
-                    "Room is the authority. Pending and retry rows are never removed by sent-history " +
-                        "retention and replay in capture order.",
+                    "Sendable rows drain in capture order. Held = blocked by contract or needs fix (quarantine). " +
+                        "Send now only attempts sendable rows.",
                 containerColor =
-                    if (snapshot.queueCount > 0) colors.warningContainer else colors.successContainer,
+                    if (snapshot.sendableCount > 0) colors.warningContainer else colors.successContainer,
                 contentColor =
-                    if (snapshot.queueCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
+                    if (snapshot.sendableCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
                 actionLabel = "Open outbox",
                 onAction = { openDestination(CollectorDestination.Delivery) },
             )
@@ -286,17 +294,17 @@ private fun StatusScreen(
         item {
             HomeTile(
                 title = "Send now",
-                summary = flushMessage ?: "Run the ordered drain now",
+                summary = flushMessage ?: "Drain sendable rows only",
                 tip =
-                    "Useful after connectivity returns. This never bypasses authentication, retry safety, " +
-                        "or queue order.",
+                    "Does not move Held (blocked/quarantined) rows. Blocked stay local until the PC allows " +
+                        "that source. Quarantined stay until the reject reason is fixed.",
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                actionLabel = "Flush queue now",
+                actionLabel = "Flush sendable now",
                 onAction = {
                     scope.launch {
                         val attempted = repository.flushNow()
-                        flushMessage = "$attempted queue item(s) attempted in capture order"
+                        flushMessage = "$attempted sendable item(s) attempted in capture order"
                     }
                 },
             )
@@ -367,12 +375,24 @@ private fun HomeTile(
 private fun LazyListScope.statusFacts(snapshot: CollectorUiSnapshot) {
     item { Text("Endpoint: ${snapshot.endpoint}") }
     item { Text("Selected sources: ${snapshot.selectedCount}") }
-    item { Text("Queue: ${snapshot.queueCount}") }
+    item { Text("Sendable now: ${snapshot.sendableCount}") }
+    item { Text("Held (blocked): ${snapshot.heldBlockedCount}") }
+    item { Text("Needs fix (quarantine): ${snapshot.heldQuarantinedCount}") }
     item { Text("Captured total: ${snapshot.totalCount}") }
     snapshot.queueCountsByState.forEach { (state, count) ->
-        item { Text("${state.name}: $count") }
+        val label =
+            when (state) {
+                DeliveryState.SENT -> "Done"
+                DeliveryState.PENDING, DeliveryState.SENDING -> "Sending"
+                DeliveryState.RETRY_WAIT, DeliveryState.PAUSED_AUTH -> "Will retry"
+                DeliveryState.BLOCKED_CONTRACT -> "Held"
+                DeliveryState.QUARANTINED -> "Needs fix"
+            }
+        item { Text("$label ($state): $count") }
     }
     item { Text("Listener: ${snapshot.listenerState}") }
+    item { Text("Battery: ${snapshot.batteryState}") }
+    item { Text("Background: ${snapshot.backgroundActivityLabel}") }
     item { Text("Last capture: ${snapshot.lastCapture}") }
     item { Text("Last send: ${snapshot.lastSend}") }
     item { Text("Last drain: ${snapshot.lastDrain}") }
@@ -452,19 +472,27 @@ private fun DeliveryScreen(
         item {
             RgdsCard(
                 title = "Outbox health",
-                subtitle = "${snapshot.queueCount} waiting · ${snapshot.totalCount} captured",
+                subtitle =
+                    if (snapshot.sendableCount > 0) {
+                        "${snapshot.sendableCount} sending soon · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    } else {
+                        "0 sending · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    },
                 badgeLabel = "Q",
-                containerColor = if (snapshot.queueCount > 0) colors.warningContainer else colors.successContainer,
+                containerColor = if (snapshot.sendableCount > 0) colors.warningContainer else colors.successContainer,
                 contentColor =
-                    if (snapshot.queueCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
+                    if (snapshot.sendableCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
             ) {
                 Text("Last ordered drain: ${snapshot.lastDrain}")
-                Text("Tip: Send now is safe after reconnect and never skips an older retrying row.")
+                Text(
+                    "Held blocked: ${snapshot.heldBlockedCount} · Needs fix: ${snapshot.heldQuarantinedCount}. " +
+                        "Send now only drains sendable rows.",
+                )
                 Button(
                     onClick = {
                         scope.launch {
                             val attempted = repository.flushNow()
-                            flushMessage = "Flush completed: $attempted queue item(s) attempted in capture order."
+                            flushMessage = "Flush completed: $attempted sendable item(s) attempted in capture order."
                         }
                     },
                     modifier =
@@ -473,7 +501,7 @@ private fun DeliveryScreen(
                             .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
                             .testTag("flush-now"),
                 ) {
-                    Text("Send queued alerts now")
+                    Text("Send sendable alerts now")
                 }
                 flushMessage?.let { Text(it) }
             }
@@ -511,7 +539,14 @@ private fun DeliveryScreen(
                 Text("State: ${presentation.label}", style = MaterialTheme.typography.titleMedium)
                 Text("Captured: ${row.occurredAt}")
                 Text("Attempts: ${row.attempts} · HTTP: ${row.httpStatus ?: "Not received"}")
-                if (row.safeFailure != null) Text("Needs attention: ${row.safeFailure}")
+                if (row.safeFailure != null) Text("Reject/reason code: ${row.safeFailure}")
+                if (row.state == "QUARANTINED") {
+                    Text(row.redactedPreview)
+                    Text(
+                        "400/413/415 quarantines stay on-device for evidence. They are not a send backlog " +
+                            "and Send now will not move them.",
+                    )
+                }
                 if (row.serverId != null) Text("Server receipt: ${row.serverId}")
                 if (row.state == "RETRY_WAIT") {
                     Button(
@@ -631,29 +666,42 @@ private fun deliveryPresentation(
 ): DeliveryPresentation =
     when (state) {
         "SENT" -> {
-            DeliveryPresentation("Sent", "OK", colors.successContainer, colors.onSuccessContainer)
+            DeliveryPresentation("Done", "OK", colors.successContainer, colors.onSuccessContainer)
         }
 
         "PENDING", "SENDING" -> {
-            DeliveryPresentation("Waiting to send", "Q", colors.infoContainer, colors.onInfoContainer)
+            DeliveryPresentation("Sending", "Q", colors.infoContainer, colors.onInfoContainer)
         }
 
-        "RETRY_WAIT", "PAUSED_AUTH" -> {
-            DeliveryPresentation("Needs retry", "!", colors.warningContainer, colors.onWarningContainer)
+        "RETRY_WAIT" -> {
+            DeliveryPresentation("Will retry", "!", colors.warningContainer, colors.onWarningContainer)
+        }
+
+        "PAUSED_AUTH" -> {
+            DeliveryPresentation("Will retry (token/device)", "!", colors.warningContainer, colors.onWarningContainer)
         }
 
         "BLOCKED_CONTRACT" -> {
             DeliveryPresentation(
-                "Saved locally — source not approved for live ingest",
+                "Held — not allowed by current ingest contract",
                 "HOLD",
                 MaterialTheme.colorScheme.secondaryContainer,
                 MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }
 
+        "QUARANTINED" -> {
+            DeliveryPresentation(
+                "Needs fix — server rejected (kept for evidence)",
+                "FIX",
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+
         else -> {
             DeliveryPresentation(
-                "Needs attention",
+                "Needs fix",
                 "!",
                 MaterialTheme.colorScheme.errorContainer,
                 MaterialTheme.colorScheme.onErrorContainer,
@@ -790,8 +838,8 @@ private fun SettingsScreen(
             RgdsCard(
                 title = "Reliability & permissions",
                 subtitle =
-                    "Access ${snapshot.notificationAccessState} · Battery ${snapshot.batteryState} · " +
-                        "Listener ${snapshot.listenerState}",
+                    "Access ${snapshot.notificationAccessLabel} · Battery ${snapshot.batteryState} · " +
+                        "Background ${snapshot.backgroundActivityLabel} · Listener ${snapshot.listenerState}",
                 badgeLabel = if (snapshot.operationallyHealthy) "OK" else "!",
                 containerColor =
                     if (snapshot.operationallyHealthy) {
@@ -806,7 +854,10 @@ private fun SettingsScreen(
                         RgdsTheme.colors.onWarningContainer
                     },
             ) {
-                Text("Tip: Return from Android Settings and this card re-checks the real OS state automatically.")
+                Text(
+                    "Home and Settings use the same OS checks. Battery must say Unrestricted and Background " +
+                        "must say Allowed — any Optimized/Restricted is a reliability bug on this phone.",
+                )
                 Button(
                     onClick = reliabilityAction.second,
                     modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
@@ -1006,8 +1057,8 @@ private fun SettingsScreen(
                 SettingsDropdown(
                     label = "Maximum stored SENT rows",
                     currentValue = current.maxSentRows,
-                    options = countOptions(1_000, 5_000, 10_000, 50_000),
-                    tip = "Bounds delivered history only; it never removes undelivered work.",
+                    options = countOptions(1_000, 5_000, 10_000, 50_000, 100_000),
+                    tip = "Soak-ready default is 100,000 SENT rows. Never removes undelivered work.",
                     onSelected = { draft = current.copy(maxSentRows = it) },
                 )
             }
@@ -1024,8 +1075,8 @@ private fun SettingsScreen(
                 SettingsDropdown(
                     label = "Maximum diagnostics rows",
                     currentValue = current.diagnosticsMaxRows,
-                    options = countOptions(500, 1_000, 2_000, 5_000),
-                    tip = "Limits only diagnostics, never captured notifications or the outbox.",
+                    options = countOptions(500, 1_000, 2_000, 5_000, 20_000, 50_000),
+                    tip = "Soak-ready default is 50,000 diagnostics rows. Never removes captures/outbox.",
                     onSelected = { draft = current.copy(diagnosticsMaxRows = it) },
                 )
             }

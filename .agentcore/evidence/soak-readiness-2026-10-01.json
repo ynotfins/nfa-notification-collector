@@ -1,0 +1,24 @@
+{
+  "captured_at": "2026-10-01T21:10:00Z",
+  "project_key": "nfa-notification-collector",
+  "apk_sha256": "4743c6f05ba64118ef907c1c23de0ea70fe9353120f6e2b55331d5a1c32b601d",
+  "unit_harness": {
+    "DrainPaceLimiterTest": "passed",
+    "WireProjectorTest_empty_rawText": "passed_EMPTY_RAW_TEXT",
+    "CollectorStatusAggregateTest_sendable_split": "passed",
+    "delivery_coordinator_suite": "passed"
+  },
+  "device_outbox_after_install": {
+    "SENT": 424,
+    "BLOCKED_CONTRACT": 19,
+    "QUARANTINED": 12,
+    "sendable": 0,
+    "held": 31,
+    "note": "31 waiting was Held only; not a send backlog"
+  },
+  "soak_100k": {
+    "status": "ready_not_executed",
+    "retention_defaults": { "maxSentRows": 100000, "diagnosticsMaxRows": 50000 },
+    "pace": { "burst": 240, "refillPerMinute": 120 }
+  }
+}

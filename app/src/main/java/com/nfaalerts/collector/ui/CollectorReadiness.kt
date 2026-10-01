@@ -85,6 +85,9 @@ data class CollectorUiSnapshot(
     val deviceId: String,
     val selectedCount: Int,
     val queueCount: Long,
+    val sendableCount: Long = 0,
+    val heldBlockedCount: Long = 0,
+    val heldQuarantinedCount: Long = 0,
     val listenerState: String,
     val listenerConnected: Boolean = false,
     val theme: String = "primary-light",
@@ -97,6 +100,8 @@ data class CollectorUiSnapshot(
     val batteryOptimizationState: BatteryOptimizationState = BatteryOptimizationState.Unknown,
     val foregroundNotificationState: ForegroundNotificationState = ForegroundNotificationState.Unknown,
     val backgroundActivityState: BackgroundActivityState = BackgroundActivityState.Unknown,
+    val backgroundActivityLabel: String = "Unknown",
+    val notificationAccessLabel: String = "Unknown",
     val recentsLocked: Boolean = false,
     val totalCount: Long = 0,
     val queueCountsByState: Map<DeliveryState, Long> = emptyMap(),
@@ -123,6 +128,9 @@ data class CollectorUiSnapshot(
 
     val guidedStep: GuidedSetupStep
         get() = GuidedSetup.next(readiness)
+
+    val heldCount: Long
+        get() = heldBlockedCount + heldQuarantinedCount
 }
 
 object DeliveryRetryEligibility {

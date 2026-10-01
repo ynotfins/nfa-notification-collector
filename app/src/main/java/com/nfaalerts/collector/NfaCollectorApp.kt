@@ -3,10 +3,15 @@ package com.nfaalerts.collector
 import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
+import com.nfaalerts.collector.contract.ContractSyncCoordinator
+import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
+import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
+import com.nfaalerts.collector.capture.LightweightPostedNotification
 import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
+import com.nfaalerts.collector.delivery.DrainPaceLimiter
 import com.nfaalerts.collector.config.AtomicCollectorConfigStore
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigLoadResult
@@ -103,13 +108,25 @@ class AppContainer(
             settings = ::runtimeDeliverySettings,
             transport = IngestTransport(ingestClient::send),
             scheduler = deliveryScheduler,
+            paceLimiter = DrainPaceLimiter(),
         )
+    }
+    private val contractSync by lazy {
+        ContractSyncCoordinator.create(application.applicationContext) {
+            runCatching {
+                application.applicationContext.assets
+                    .open("INGEST-CONTRACT.md")
+                    .bufferedReader()
+                    .use { it.readText() }
+            }.getOrDefault("")
+        }
     }
     private val captureProcessor: NotificationCaptureProcessor by lazy {
         NotificationCaptureProcessor.createAndroid(
             packageManager = application.packageManager,
             captureWriteDao = { database.captureWriteDao() },
             onPersisted = ::startImmediateDeliveryAfterPersist,
+            contractVersionProvider = { contractSync.activeContractVersion() },
         )
     }
 
@@ -132,6 +149,7 @@ class AppContainer(
         scope.launch(Dispatchers.IO) {
             sourceSelections.load()
             postedNotificationCallback.onSelectionLoadCompleted()
+            runCatching { contractSync.maybeCheck(force = true) }
             recoverDeliveryOnStartup()
         }
     }
@@ -237,6 +255,18 @@ class AppContainer(
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
         scope.launch { runDeliveryDrain("immediate-$eventId", maximumClaims = 1) }
+    }
+
+    suspend fun reconcileActiveNotifications(notifications: List<LightweightPostedNotification>): Int {
+        val catchUp =
+            ActiveNotificationCatchUp(
+                alreadyCaptured = { packageName, key, postTimeEpochMillis ->
+                    database.captureReadDao().existsIdentity(packageName, key, postTimeEpochMillis)
+                },
+                onMissing = postedNotificationCallback::onNotificationPosted,
+                diagnostics = listenerStatus,
+            )
+        return catchUp.reconcile(notifications).imported
     }
 
     private suspend fun runtimeDeliverySettings(): RuntimeDeliverySettings {

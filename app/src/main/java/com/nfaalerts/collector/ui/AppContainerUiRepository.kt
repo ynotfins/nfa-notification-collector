@@ -12,6 +12,7 @@ import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.data.CollectorStatusAggregate
+import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.security.BearerLoadState
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import kotlinx.coroutines.CoroutineScope
@@ -138,7 +139,10 @@ class AppContainerUiRepository internal constructor(
                 deviceId = document.config.deviceId,
                 theme = document.config.theme,
                 selectedCount = core.selections.size,
-                queueCount = facts.nonSentCount,
+                queueCount = facts.sendableCount,
+                sendableCount = facts.sendableCount,
+                heldBlockedCount = facts.heldBlockedCount,
+                heldQuarantinedCount = facts.heldQuarantinedCount,
                 listenerState = if (core.listener.connected) "Connected" else "Disconnected",
                 listenerConnected = core.listener.connected,
                 lastCapture = facts.lastCaptureAtEpochMillis?.toString() ?: "Unknown",
@@ -150,6 +154,8 @@ class AppContainerUiRepository internal constructor(
                 batteryOptimizationState = reliability.battery,
                 foregroundNotificationState = reliability.foregroundNotification,
                 backgroundActivityState = reliability.backgroundActivity,
+                backgroundActivityLabel = reliability.backgroundActivity.label(),
+                notificationAccessLabel = access.label(),
                 recentsLocked = document.config.reliability.recentsLocked,
                 totalCount = facts.totalCount,
                 queueCountsByState = facts.countsByState,
@@ -273,7 +279,16 @@ class AppContainerUiRepository internal constructor(
                     safeFailure = it.lastErrorCode,
                     serverId = it.serverIngestId,
                     occurredAt = it.capturedAtEpochMillis,
-                    redactedPreview = "Notification content redacted",
+                    redactedPreview =
+                        when {
+                            it.state == DeliveryState.QUARANTINED && !it.quarantinePreview.isNullOrBlank() -> {
+                                "Rejected text preview: ${it.quarantinePreview}"
+                            }
+                            it.state == DeliveryState.QUARANTINED -> {
+                                "Needs fix — open preview for rejected raw text (row kept forever until operator policy)"
+                            }
+                            else -> "Notification content redacted"
+                        },
                 )
             }
         }
@@ -444,8 +459,22 @@ class AppContainerUiRepository internal constructor(
     private fun BatteryOptimizationState.label() =
         when (this) {
             BatteryOptimizationState.Exempt -> "Unrestricted"
-            BatteryOptimizationState.Optimized -> "Optimization active"
+            BatteryOptimizationState.Optimized -> "Optimized (fix required)"
             BatteryOptimizationState.Unknown -> "Unknown"
+        }
+
+    private fun BackgroundActivityState.label() =
+        when (this) {
+            BackgroundActivityState.Allowed -> "Allowed"
+            BackgroundActivityState.Restricted -> "Restricted by Samsung/Android (fix required)"
+            BackgroundActivityState.Unknown -> "Unknown"
+        }
+
+    private fun NotificationAccessState.label() =
+        when (this) {
+            NotificationAccessState.Granted -> "On"
+            NotificationAccessState.Required -> "Off (fix required)"
+            NotificationAccessState.Unknown -> "Unknown"
         }
 
     private fun verificationMessage(

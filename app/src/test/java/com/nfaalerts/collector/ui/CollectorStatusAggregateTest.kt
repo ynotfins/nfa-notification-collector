@@ -29,6 +29,9 @@ class CollectorStatusAggregateTest {
 
         assertEquals(205L, facts.totalCount)
         assertEquals(105L, facts.nonSentCount)
+        assertEquals(104L, facts.sendableCount)
+        assertEquals(1L, facts.heldBlockedCount)
+        assertEquals(0L, facts.heldQuarantinedCount)
         assertEquals(101L, facts.countsByState.getValue(DeliveryState.PENDING))
         assertEquals(100L, facts.countsByState.getValue(DeliveryState.SENT))
         assertEquals(900L, facts.lastCaptureAtEpochMillis)

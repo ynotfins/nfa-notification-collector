@@ -9,12 +9,28 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationAccessStatus
 
 class CollectorReliabilityService : Service() {
+    private val handler = Handler(Looper.getMainLooper())
+    private val watchdog =
+        object : Runnable {
+            override fun run() {
+                if (!hasNotificationAccess(this@CollectorReliabilityService)) {
+                    stopSelf()
+                    return
+                }
+                requestCollectorListenerRebind(this@CollectorReliabilityService)
+                (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
+                handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+            }
+        }
+
     override fun onCreate() {
         super.onCreate()
         val manager = getSystemService(NotificationManager::class.java)
@@ -38,12 +54,20 @@ class CollectorReliabilityService : Service() {
         startId: Int,
     ): Int {
         if (!hasNotificationAccess(this)) {
+            handler.removeCallbacks(watchdog)
             stopSelf()
             return START_NOT_STICKY
         }
         requestCollectorListenerRebind(this)
         (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
+        handler.removeCallbacks(watchdog)
+        handler.postDelayed(watchdog, WATCHDOG_INTERVAL_MS)
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(watchdog)
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -72,6 +96,7 @@ class CollectorReliabilityService : Service() {
     companion object {
         private const val CHANNEL_ID = "collector-reliability"
         private const val NOTIFICATION_ID = 2701
+        private const val WATCHDOG_INTERVAL_MS = 5 * 60 * 1000L
 
         fun update(context: Context) {
             val intent = Intent(context, CollectorReliabilityService::class.java)

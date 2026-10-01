@@ -50,6 +50,7 @@ class NotificationCaptureProcessor(
     private val persistence: CapturePersistence,
     private val serializer: SafeCanonicalSerializer = SafeCanonicalSerializer(),
     private val onPersisted: suspend (String) -> Unit = {},
+    private val contractVersionProvider: () -> String = { "unknown" },
 ) {
     suspend fun process(request: DispatchedNotification) {
         val rows =
@@ -177,6 +178,7 @@ class NotificationCaptureProcessor(
                 eventId = request.eventId,
                 state = state,
                 lastErrorCode = errorCode,
+                contractVersion = contractVersionProvider(),
                 createdAtEpochMillis = request.capturedAtEpochMillis,
                 updatedAtEpochMillis = request.capturedAtEpochMillis,
             )
@@ -258,6 +260,7 @@ class NotificationCaptureProcessor(
             packageManager: PackageManager,
             captureWriteDao: () -> com.nfaalerts.collector.data.CaptureWriteDao,
             onPersisted: suspend (String) -> Unit = {},
+            contractVersionProvider: () -> String = { "unknown" },
         ) = NotificationCaptureProcessor(
             reader =
                 NotificationContentReader {
@@ -282,6 +285,7 @@ class NotificationCaptureProcessor(
                     captureWriteDao().insertCapture(capture, outbox)
                 },
             onPersisted = onPersisted,
+            contractVersionProvider = contractVersionProvider,
         )
     }
 }

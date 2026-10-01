@@ -69,12 +69,19 @@ class WireProjectorTest {
     fun rawTextLimitAndNulQuarantineWithoutTruncation() {
         val oversized = projector.project(capture(rawText = "x".repeat(131_073)))
         val nul = projector.project(capture(rawText = "not\u0000wire-safe"))
+        val empty = projector.project(capture(rawText = "   "))
+        val template = projector.project(capture(rawText = "{not_text_big}"))
 
         assertEquals(
             WireProjectionResult.Quarantined("WIRE_RAW_TEXT_LIMIT", 131_073),
             oversized,
         )
         assertEquals(WireProjectionResult.Quarantined("WIRE_RAW_TEXT_NUL", 1), nul)
+        assertEquals(WireProjectionResult.Quarantined("EMPTY_RAW_TEXT", 0), empty)
+        assertEquals(
+            WireProjectionResult.Quarantined("UNRESOLVED_TEMPLATE_RAW_TEXT", "{not_text_big}".length),
+            template,
+        )
     }
 
     @Test

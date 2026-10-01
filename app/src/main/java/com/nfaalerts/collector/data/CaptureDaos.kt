@@ -39,8 +39,25 @@ interface CaptureReadDao {
 
     @Query(
         """
+        SELECT EXISTS(
+          SELECT 1 FROM captured_notifications
+          WHERE packageName = :packageName
+            AND notificationKey = :notificationKey
+            AND postTimeEpochMillis = :postTimeEpochMillis
+        )
+        """,
+    )
+    suspend fun existsIdentity(
+        packageName: String,
+        notificationKey: String,
+        postTimeEpochMillis: Long,
+    ): Boolean
+
+    @Query(
+        """
         SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
-               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId,
+               CASE WHEN o.state = 'QUARANTINED' THEN substr(coalesce(c.rawText, ''), 1, 160) ELSE NULL END AS quarantinePreview
         FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
         ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
         """,
@@ -50,7 +67,8 @@ interface CaptureReadDao {
     @Query(
         """
         SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
-               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId,
+               CASE WHEN o.state = 'QUARANTINED' THEN substr(coalesce(c.rawText, ''), 1, 160) ELSE NULL END AS quarantinePreview
         FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
         ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
         """,
@@ -108,6 +126,7 @@ data class DeliveryInspection(
     val lastHttpStatus: Int?,
     val lastErrorCode: String?,
     val serverIngestId: String?,
+    val quarantinePreview: String? = null,
 )
 
 @Dao

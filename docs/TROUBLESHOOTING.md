@@ -23,6 +23,17 @@ Android must not use PC loopback `127.0.0.1`. The expected private URL is `https
 
 Contract drift: if the phone payload disagrees with `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`, fix the phone (or request an nfa-platform contract bump) — do not invent a third shape.
 
+## Queue truth
+
+- **Sendable** = PENDING + SENDING + RETRY_WAIT + PAUSED_AUTH
+- **Held** = BLOCKED_CONTRACT + QUARANTINED
+- Home must never call Held rows a “send backlog.” Send now only drains sendable rows.
+- Operator labels: Done / Sending / Will retry / Needs fix / Held
+
+## Quarantine (HTTP 400/413/415)
+
+Quarantined rows stay forever for evidence unless an explicit operator policy discards them later. Preview rejected rawText from the queue card. Empty rawText is invalid under the live gateway and quarantines locally before POST when possible.
+
 ## Listener/background reliability (One UI / Android 16)
 
 Show the app's listener/access/battery/network/queue timestamps before collecting logs.

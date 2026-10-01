@@ -6,6 +6,9 @@ import com.nfaalerts.collector.data.DeliveryState
 data class CollectorStatusFacts(
     val totalCount: Long,
     val nonSentCount: Long,
+    val sendableCount: Long,
+    val heldBlockedCount: Long,
+    val heldQuarantinedCount: Long,
     val countsByState: Map<DeliveryState, Long>,
     val lastCaptureAtEpochMillis: Long?,
     val lastSentAtEpochMillis: Long?,
@@ -17,6 +20,13 @@ data class CollectorStatusFacts(
             CollectorStatusFacts(
                 totalCount = aggregate.totalCount,
                 nonSentCount = aggregate.nonSentCount,
+                sendableCount =
+                    aggregate.pendingCount +
+                        aggregate.sendingCount +
+                        aggregate.retryWaitCount +
+                        aggregate.pausedAuthCount,
+                heldBlockedCount = aggregate.blockedContractCount,
+                heldQuarantinedCount = aggregate.quarantinedCount,
                 countsByState =
                     mapOf(
                         DeliveryState.PENDING to aggregate.pendingCount,
