@@ -8,7 +8,7 @@ Produce an installable native Android utility for a Samsung Galaxy S26 Ultra tha
 
 Package/application ID: `com.nfaalerts.collector`
 
-The phone performs capture and reliable transport only. Parsing and downstream business logic remain on the PC.
+**Contract:** follow `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json` (daily poll) and `docs/INGEST-CONTRACT.md`. Phone performs capture and reliable transport only. Parsing and downstream business logic remain on the PC.
 
 ## Architecture
 

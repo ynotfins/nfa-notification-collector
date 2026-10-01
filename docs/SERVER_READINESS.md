@@ -1,24 +1,25 @@
 # Server Readiness Snapshot
 
-Captured: 2026-08-17. Mutable truth remains `D:\NFA-Database-Control\DATABASE_STATE.md` and live source under `D:\nfa-alerts-database`.
+Updated: 2026-10-01. Mutable operational counts remain in `D:\NFA-Database-Control\DATABASE_STATE.md` when attached. Phone ingest **contract** authority is nfa-platform (`contracts/ingest/phone-alerts.contract.json`, `DATABASE.md` §10, `scripts/ingest-gateway.ts`).
 
 ## Ready
 
-- PostgreSQL 18.4 at loopback `127.0.0.1:55433`.
-- Capture database `nfa_ingest_capture`.
-- Gateway scheduled task `\NFA\AlertsIngestGateway` and immutable release `0.1.0-8792f908df7e9ab7` were locally healthy.
-- Local route `http://127.0.0.1:8787/v1/ingest/alerts` returned committed 202 responses.
-- Device `nfa-primary-phone` is enabled with one active credential.
-- The plaintext bearer exists only in Windows User variable `NFA_INGEST_DEVICE_BEARER_CURRENT`; it must be manually entered on Android and is never copied into this repository.
+- PostgreSQL capture database `nfa_ingest_capture` on the AgentCore/NFA cluster (loopback `127.0.0.1:55433` on CHAOSCENTRAL).
+- Windows service `NFA-Platform-Ingest` serves `scripts/ingest-gateway.ts` on port **8787**.
+- Local route `http://127.0.0.1:8787/v1/ingest/alerts` returns committed **202** responses for valid schema-v1 bodies.
+- Loopback liveness: `GET http://127.0.0.1:8787/health` → `{"status":"ok"}` (**health exists**; older “no GET health” wording was wrong).
+- Tailscale MagicDNS `https://chaoscentral.tailb71e7e.ts.net` is used by the phone for `POST /v1/ingest/alerts`; authenticated **202** is the acceptance proof (ICMP alone is not).
+- Device credentials are issued/rotated via Windows env (`NFA_INGEST_DEVICE_BEARER_CURRENT` and successors); plaintext bearer is entered on Android only and never committed to this repository.
 - Runtime DB role is least privilege; Android needs no database role, HBA line, grant, or password.
-- Append-only, duplicate, rate-limit, rotation/revocation, logging-redaction, export, and isolation tests have passed according to the state authority.
+- Live top-level `source` is **BNN-only**.
 
-## Not ready / decision required
+## Not ready / still gated
 
-- Tailscale phone reachability has not been proven; the expected private URL is not operational evidence.
-- Top-level `source` is BNN-only. Second-source delivery requires the explicit server amendment described in `INGEST-CONTRACT.md`.
-- The gateway has no GET health endpoint. An authenticated POST verification creates an append-only capture and must be labelled accordingly.
+- Overnight / ≥15 minute **locked-screen idle** capture proof for the native collector (shade → Room → 202) before claiming “never miss.”
+- Airplane-mode catch-up and reboot reconnect proofs (session-dependent).
+- Second-source live delivery (requires nfa-platform multi-source amendment). Non-BNN stays `BLOCKED_CONTRACT`.
+- 100k soak: pace to rate limits; raise SENT/diagnostics retention for post-mortems (see operator soak requirements).
 
-## Database adjustment result for this bootstrap
+## Database adjustment result
 
-No database schema, role, permission, HBA, or credential change is required for the first BNN-compatible collector build. Do not grant Android direct database access. The only future database change is the separately approved multi-source migration, if the operator accepts it.
+No Android direct database access. Schema-v1 phone body remains the compatibility surface. Multi-source top-level `source` expansion is a separate nfa-platform change only.
