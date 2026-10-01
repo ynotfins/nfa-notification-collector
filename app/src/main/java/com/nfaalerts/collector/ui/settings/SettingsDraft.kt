@@ -20,6 +20,7 @@ data class SettingsDraft(
     val profiles: List<EndpointProfileDraft>,
     val activeProfile: String,
     val deviceId: String,
+    val theme: String,
     val connectTimeoutMs: String,
     val readTimeoutMs: String,
     val initialBackoffMs: String,
@@ -28,6 +29,7 @@ data class SettingsDraft(
     val maxSentRows: String,
     val diagnosticsDays: String,
     val diagnosticsMaxRows: String,
+    val recentsLocked: Boolean,
 ) {
     fun resetToApprovedDefaults(): SettingsDraft = from(CollectorConfigCodec().defaultDocument())
 
@@ -39,6 +41,7 @@ data class SettingsDraft(
     private fun encodedRoot(): JsonObject {
         val root = preservedRoot.toMutableMap()
         root["deviceId"] = JsonPrimitive(deviceId)
+        root["theme"] = JsonPrimitive(theme)
         root["activeEndpointProfile"] = JsonPrimitive(activeProfile)
         val previousProfiles = (preservedRoot["endpointProfiles"] as? JsonObject).orEmpty()
         root["endpointProfiles"] =
@@ -69,6 +72,10 @@ data class SettingsDraft(
                 "retentionDays" to numeric(diagnosticsDays),
                 "maxRows" to numeric(diagnosticsMaxRows),
             )
+        root["reliability"] =
+            (preservedRoot["reliability"] as? JsonObject).withFields(
+                "recentsLocked" to JsonPrimitive(recentsLocked),
+            )
         return JsonObject(root)
     }
 
@@ -84,6 +91,7 @@ data class SettingsDraft(
                         }.sortedBy(EndpointProfileDraft::name),
                 activeProfile = config.activeEndpointProfile,
                 deviceId = config.deviceId,
+                theme = config.theme,
                 connectTimeoutMs = config.delivery.connectTimeoutMs.toString(),
                 readTimeoutMs = config.delivery.readTimeoutMs.toString(),
                 initialBackoffMs = config.delivery.initialBackoffMs.toString(),
@@ -92,6 +100,7 @@ data class SettingsDraft(
                 maxSentRows = config.retention.maxSentRows.toString(),
                 diagnosticsDays = config.diagnostics.retentionDays.toString(),
                 diagnosticsMaxRows = config.diagnostics.maxRows.toString(),
+                recentsLocked = config.reliability.recentsLocked,
             )
         }
 

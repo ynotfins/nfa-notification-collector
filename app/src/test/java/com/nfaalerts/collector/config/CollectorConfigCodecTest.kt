@@ -16,6 +16,7 @@ class CollectorConfigCodecTest {
         val document = codec.defaultDocument()
 
         assertEquals("nfa-primary-phone", document.config.deviceId)
+        assertEquals("primary-light", document.config.theme)
         assertEquals("tailscale", document.config.activeEndpointProfile)
         assertEquals(
             "https://chaoscentral.tailb71e7e.ts.net",
@@ -29,6 +30,19 @@ class CollectorConfigCodecTest {
         assertEquals(14, document.config.diagnostics.retentionDays)
         assertEquals(2_000, document.config.diagnostics.maxRows)
         assertFalse(document.root.toString().contains("maxAttempts"))
+    }
+
+    @Test
+    fun aFifthThemeIsRejected() {
+        val payload =
+            codec
+                .exportPayload(codec.defaultDocument())
+                .decodeToString()
+                .replace("\"theme\":\"primary-light\"", "\"theme\":\"unsupported\"")
+
+        val result = codec.decode(payload.encodeToByteArray()) as ConfigDecodeResult.Invalid
+
+        assertTrue(result.errors.any { it.path == "/theme" && it.code == "THEME_UNSUPPORTED" })
     }
 
     @Test

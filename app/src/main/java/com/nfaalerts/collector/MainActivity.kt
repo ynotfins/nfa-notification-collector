@@ -2,15 +2,19 @@ package com.nfaalerts.collector
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.nfaalerts.collector.ui.AppContainerUiRepository
 import com.nfaalerts.collector.ui.CollectorHomeScreen
 import com.nfaalerts.collector.ui.theme.NfaCollectorTheme
+import com.nfaalerts.collector.ui.theme.RgdsThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -20,6 +24,10 @@ import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
     private lateinit var uiRepository: AppContainerUiRepository
+    private val requestForegroundNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            if (::uiRepository.isInitialized) uiRepository.refreshPlatformState()
+        }
     private val importConfig =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri ?: return@registerForActivityResult
@@ -121,7 +129,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         uiRepository = AppContainerUiRepository(this, (application as NfaCollectorApp).appContainer, lifecycleScope)
         setContent {
-            NfaCollectorTheme {
+            val snapshot by uiRepository.state.collectAsStateWithLifecycle()
+            NfaCollectorTheme(RgdsThemeMode.fromDataTheme(snapshot.theme)) {
                 CollectorHomeScreen(
                     repository = uiRepository,
                     openNotificationAccessSettings = {
@@ -129,6 +138,21 @@ class MainActivity : ComponentActivity() {
                     },
                     openBatterySettings = {
                         startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    },
+                    requestForegroundNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            requestForegroundNotificationPermission.launch(
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            )
+                        }
+                    },
+                    openAppDetailsSettings = {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", packageName, null),
+                            ),
+                        )
                     },
                     requestImport = { importConfig.launch(arrayOf("application/json", "text/plain")) },
                     requestExport = { exportConfig.launch("collector-config.json") },
@@ -141,6 +165,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::uiRepository.isInitialized) uiRepository.refreshPlatformState()
+        CollectorReliabilityService.update(this)
     }
 
     private companion object {

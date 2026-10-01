@@ -46,14 +46,20 @@ data class DiagnosticsConfig(
     val maxRows: Int,
 )
 
+data class ReliabilityConfig(
+    val recentsLocked: Boolean,
+)
+
 data class CollectorConfig(
     val configVersion: Int,
     val deviceId: String,
+    val theme: String,
     val activeEndpointProfile: String,
     val endpointProfiles: Map<String, EndpointProfile>,
     val delivery: DeliveryConfig,
     val retention: RetentionConfig,
     val diagnostics: DiagnosticsConfig,
+    val reliability: ReliabilityConfig,
 ) {
     val activeEndpoint: EndpointProfile
         get() = endpointProfiles.getValue(activeEndpointProfile)
@@ -165,12 +171,14 @@ class CollectorConfigCodec {
         val delivery = root.getValue("delivery").jsonObject
         val retention = root.getValue("retention").jsonObject
         val diagnostics = root.getValue("diagnostics").jsonObject
+        val reliability = root.getValue("reliability").jsonObject
         return CollectorConfigDocument(
             root = root,
             config =
                 CollectorConfig(
                     configVersion = CURRENT_VERSION,
                     deviceId = root.getValue("deviceId").jsonPrimitive.content,
+                    theme = root.getValue("theme").jsonPrimitive.content,
                     activeEndpointProfile = root.getValue("activeEndpointProfile").jsonPrimitive.content,
                     endpointProfiles = endpoints,
                     delivery =
@@ -190,6 +198,10 @@ class CollectorConfigCodec {
                             retentionDays = diagnostics.getValue("retentionDays").jsonPrimitive.int,
                             maxRows = diagnostics.getValue("maxRows").jsonPrimitive.int,
                         ),
+                    reliability =
+                        ReliabilityConfig(
+                            recentsLocked = reliability.getValue("recentsLocked").jsonPrimitive.booleanOrNull == true,
+                        ),
                 ),
             migratedFromVersion = migratedFromVersion,
         )
@@ -202,6 +214,11 @@ class CollectorConfigCodec {
         val deviceId = (deviceElement as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull.orEmpty()
         if (!DEVICE_ID.matches(deviceId)) {
             errors += ConfigValidationError("/deviceId", "DEVICE_ID_FORMAT", "Device ID is invalid.")
+        }
+        val themeElement = root["theme"]
+        val theme = (themeElement as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull
+        if (theme !in SUPPORTED_THEMES) {
+            errors += ConfigValidationError("/theme", "THEME_UNSUPPORTED", "Theme must be one of the four RGDS modes.")
         }
 
         val activeElement = root["activeEndpointProfile"]
@@ -271,11 +288,20 @@ class CollectorConfigCodec {
             errors += ConfigValidationError("/sources", "TOO_MANY_SOURCES", "At most ten sources are allowed.")
         }
         sources?.let { validateSources(it, errors) }
-        listOf("delivery", "retention", "diagnostics").forEach { section ->
+        listOf("delivery", "retention", "diagnostics", "reliability").forEach { section ->
             if (root[section] !is JsonObject) {
                 errors +=
                     ConfigValidationError("/$section", "OBJECT_REQUIRED", "Configuration section must be an object.")
             }
+        }
+        val recentsLocked = ((root["reliability"] as? JsonObject)?.get("recentsLocked") as? JsonPrimitive)
+        if (recentsLocked?.takeUnless(JsonPrimitive::isString)?.booleanOrNull == null) {
+            errors +=
+                ConfigValidationError(
+                    "/reliability/recentsLocked",
+                    "BOOLEAN_REQUIRED",
+                    "Recents-lock confirmation must be a boolean.",
+                )
         }
         val connectTimeout = validateLongRange(root, "delivery", "connectTimeoutMs", 5_000L..60_000L, errors)
         val readTimeout = validateLongRange(root, "delivery", "readTimeoutMs", 5_000L..120_000L, errors)
@@ -504,6 +530,7 @@ class CollectorConfigCodec {
         val result = root.toMutableMap()
         result["configVersion"] = JsonPrimitive(CURRENT_VERSION)
         result["deviceId"] = result["deviceId"] ?: JsonPrimitive(DEFAULT_DEVICE_ID)
+        result["theme"] = result["theme"] ?: JsonPrimitive(DEFAULT_THEME)
         result["activeEndpointProfile"] = result["activeEndpointProfile"] ?: JsonPrimitive(DEFAULT_PROFILE)
         val defaultEndpoints =
             JsonObject(
@@ -531,13 +558,18 @@ class CollectorConfigCodec {
         result["delivery"] = mergeKnownObject(defaultDelivery, result["delivery"])
         result["retention"] =
             mergeKnownObject(
-                JsonObject(mapOf("maxSentRows" to JsonPrimitive(10_000), "sentDays" to JsonPrimitive(90))),
+                JsonObject(mapOf("maxSentRows" to JsonPrimitive(100_000), "sentDays" to JsonPrimitive(180))),
                 result["retention"],
             )
         result["diagnostics"] =
             mergeKnownObject(
-                JsonObject(mapOf("maxRows" to JsonPrimitive(2_000), "retentionDays" to JsonPrimitive(14))),
+                JsonObject(mapOf("maxRows" to JsonPrimitive(50_000), "retentionDays" to JsonPrimitive(90))),
                 result["diagnostics"],
+            )
+        result["reliability"] =
+            mergeKnownObject(
+                JsonObject(mapOf("recentsLocked" to JsonPrimitive(false))),
+                result["reliability"],
             )
         return JsonObject(result)
     }
@@ -608,12 +640,14 @@ class CollectorConfigCodec {
     companion object {
         const val CURRENT_VERSION = 1
         const val DEFAULT_DEVICE_ID = "nfa-primary-phone"
+        const val DEFAULT_THEME = "primary-light"
         const val DEFAULT_PROFILE = "tailscale"
         const val DEFAULT_BASE_URL = "https://chaoscentral.tailb71e7e.ts.net"
         const val DEFAULT_INGEST_PATH = "/v1/ingest/alerts"
         const val MAX_PAYLOAD_BYTES = 1_048_576
         private const val LEGACY_PROFILE = "legacy"
         private const val MAX_BACKOFF_MS = 21_600_000L
+        private val SUPPORTED_THEMES = setOf("primary-light", "secondary-light", "primary-dark", "secondary-dark")
         private val DEVICE_ID = Regex("[A-Za-z0-9._:-]{1,128}")
         private val BEARER_TOKEN_SHAPE = Regex("[A-Za-z0-9_-]{43}")
         private val PROHIBITED_FIELDS =

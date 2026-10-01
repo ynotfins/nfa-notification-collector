@@ -1,0 +1,18 @@
+lock_start=2026-10-01T16:34:19.4252582-04:00
+lock_monitor_start=2026-10-01T16:34:28.6648420-04:00
+t+1 min=16:35:28 power=mWakefulness=Dozing captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+2 min=16:36:30 power=mWakefulness=Dozing captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+3 min=16:37:30 power=mWakefulness=Dozing captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+4 min=16:38:31 power=mWakefulness=Dozing captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+5 min=16:39:32 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+6 min=16:40:32 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+7 min=16:41:33 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+8 min=16:42:33 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+9 min=16:43:34 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+10 min=16:44:34 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+11 min=16:45:35 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+12 min=16:46:36 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+13 min=16:47:36 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+14 min=16:48:37 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+t+15 min=16:49:37 power=mWakefulness=Awake captures=455 2026-10-01 14:24:00.340000 bnn_newest=2026-10-01 14:24:00.093000 1907808
+lock_monitor_end=2026-10-01T16:49:38.1809236-04:00

@@ -29,11 +29,13 @@ data class CollectorReadiness(
             }
 }
 
-enum class CollectorDestination {
-    Status,
-    Sources,
-    Delivery,
-    Settings,
+enum class CollectorDestination(
+    val label: String,
+) {
+    Status("Home"),
+    Sources("Sources"),
+    Delivery("Queue"),
+    Settings("Settings"),
 }
 
 enum class GuidedSetupStep {
@@ -46,18 +48,14 @@ enum class GuidedSetupStep {
 }
 
 object GuidedSetup {
-    fun next(
-        readiness: CollectorReadiness,
-        verificationComplete: Boolean = false,
-    ): GuidedSetupStep =
+    fun next(readiness: CollectorReadiness): GuidedSetupStep =
         when {
             !readiness.notificationAccessGranted -> GuidedSetupStep.Access
             !readiness.endpointIsValid -> GuidedSetupStep.Endpoint
             !readiness.bearerSaved -> GuidedSetupStep.Token
             !readiness.deviceIdIsValid -> GuidedSetupStep.Endpoint
             readiness.enabledSourceCount == 0 -> GuidedSetupStep.Sources
-            verificationComplete -> GuidedSetupStep.Ready
-            else -> GuidedSetupStep.Verify
+            else -> GuidedSetupStep.Ready
         }
 }
 
@@ -87,12 +85,24 @@ data class CollectorUiSnapshot(
     val deviceId: String,
     val selectedCount: Int,
     val queueCount: Long,
+    val sendableCount: Long = 0,
+    val heldBlockedCount: Long = 0,
+    val heldQuarantinedCount: Long = 0,
     val listenerState: String,
+    val listenerConnected: Boolean = false,
+    val theme: String = "primary-light",
     val lastCapture: String = "Unknown",
     val lastSend: String = "Unknown",
+    val lastDrain: String = "Unknown",
     val lastError: String = "Unknown",
     val networkState: String = "Unknown",
     val batteryState: String = "Unknown",
+    val batteryOptimizationState: BatteryOptimizationState = BatteryOptimizationState.Unknown,
+    val foregroundNotificationState: ForegroundNotificationState = ForegroundNotificationState.Unknown,
+    val backgroundActivityState: BackgroundActivityState = BackgroundActivityState.Unknown,
+    val backgroundActivityLabel: String = "Unknown",
+    val notificationAccessLabel: String = "Unknown",
+    val recentsLocked: Boolean = false,
     val totalCount: Long = 0,
     val queueCountsByState: Map<DeliveryState, Long> = emptyMap(),
     val serverReceivedAt: String = "Unknown",
@@ -102,10 +112,25 @@ data class CollectorUiSnapshot(
     val notificationAccessState: NotificationAccessState = NotificationAccessState.Unknown,
     val connectivityState: ConnectivityState = ConnectivityState.Unknown,
     val canonicalConfigRevision: String = "",
+    val bearerSavedAtEpochMillis: Long? = null,
+    val bearerRevisionOk: Boolean = false,
     internal val liveVerificationFingerprint: LiveVerificationFingerprint? = null,
 ) {
+    val operationallyHealthy: Boolean
+        get() =
+            readiness.state == CollectorReadinessState.Ready &&
+                notificationAccessState == NotificationAccessState.Granted &&
+                batteryOptimizationState == BatteryOptimizationState.Exempt &&
+                backgroundActivityState == BackgroundActivityState.Allowed &&
+                foregroundNotificationState in
+                setOf(ForegroundNotificationState.Granted, ForegroundNotificationState.NotRequired) &&
+                listenerConnected
+
     val guidedStep: GuidedSetupStep
-        get() = GuidedSetup.next(readiness, verificationComplete)
+        get() = GuidedSetup.next(readiness)
+
+    val heldCount: Long
+        get() = heldBlockedCount + heldQuarantinedCount
 }
 
 object DeliveryRetryEligibility {

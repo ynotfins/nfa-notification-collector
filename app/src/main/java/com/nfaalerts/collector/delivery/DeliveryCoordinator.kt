@@ -109,6 +109,7 @@ class DeliveryCoordinator(
         },
     private val clock: () -> Long = System::currentTimeMillis,
     private val retryPolicy: RetryPolicy = RetryPolicy(),
+    private val paceLimiter: DrainPaceLimiter = DrainPaceLimiter(sleeper = {}),
 ) {
     suspend fun drainOne(owner: String): Boolean {
         var claim: DeliveryOutboxEntity? = null
@@ -158,6 +159,7 @@ class DeliveryCoordinator(
                 }
 
                 is WireProjectionResult.Ready -> {
+                    paceLimiter.beforeSend()
                     deliver(owner, claimStartedAt, activeClaim, runtime, retryBounds, projection)
                 }
             }

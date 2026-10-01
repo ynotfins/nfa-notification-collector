@@ -8,6 +8,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -28,7 +29,7 @@ class AndroidKeystoreBearerStoreInstrumentedTest {
             val suffix = System.nanoTime().toString()
             val alias = "nfa-test-$suffix"
             val fileName = "bearer-$suffix.json"
-            val store = AndroidKeystoreBearerStore(context, alias, fileName)
+            val store = AndroidKeystoreBearerStore(context, alias, fileName, clock = { 1_234L })
             try {
                 val first = "first-device-token".toCharArray()
                 store.save(first)
@@ -36,7 +37,11 @@ class AndroidKeystoreBearerStoreInstrumentedTest {
                 val firstEnvelope = File(context.noBackupFilesDir, fileName).readBytes()
                 val loadedFirst = store.load() as BearerLoadState.Present
                 assertArrayEquals("first-device-token".toCharArray(), loadedFirst.value)
+                assertEquals(1_234L, loadedFirst.savedAtEpochMillis)
                 loadedFirst.clear()
+                val reopened = AndroidKeystoreBearerStore(context, alias, fileName).load() as BearerLoadState.Present
+                assertEquals(1_234L, reopened.savedAtEpochMillis)
+                reopened.clear()
 
                 val same = "first-device-token".toCharArray()
                 store.save(same)

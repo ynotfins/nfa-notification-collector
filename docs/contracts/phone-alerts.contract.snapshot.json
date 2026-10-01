@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "2026-10-01.schema-v1.bnn-only",
+  "requiredHeaders": [
+    "Content-Type: application/json",
+    "Authorization: Bearer <device-token>",
+    "X-NFA-Schema-Version: 1"
+  ],
+  "bodyFields": ["schemaVersion", "source", "deviceId", "capturedAt", "rawText", "metadata"],
+  "allowedSources": ["bnn"],
+  "bodyLimitBytes": 262144,
+  "rawTextLimitBytes": 131072,
+  "metadataLimitBytes": 32768,
+  "burstLimit": 240,
+  "refillPerMinute": 120,
+  "emptyRawTextPolicy": "reject_400_quarantine",
+  "quarantineHttpStatuses": [400, 413, 415],
+  "retryHttpStatuses": [429, 503],
+  "pauseAuthHttpStatuses": [401],
+  "notes": "Mirror of nfa-platform DATABASE.md §10 + ingest-gateway.ts until contracts/ingest/phone-alerts.contract.json is published."
+}

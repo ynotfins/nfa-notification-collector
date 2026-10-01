@@ -65,6 +65,8 @@ interface CollectorUiRepository {
     suspend fun formattedConfig(): String
 
     suspend fun retry(eventId: String): Boolean
+
+    suspend fun flushNow(): Int = 0
 }
 
 interface SourcePickerUiAccess {

@@ -48,6 +48,7 @@ data class DeliveryOutboxEntity(
     val lastErrorCode: String? = null,
     val serverIngestId: String? = null,
     val serverReceivedAt: String? = null,
+    val contractVersion: String = "unknown",
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )

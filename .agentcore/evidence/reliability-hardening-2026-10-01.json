@@ -1,0 +1,46 @@
+{
+  "captured_at": "2026-10-01T20:34:00Z",
+  "project_key": "nfa-notification-collector",
+  "device": {
+    "serial": "R3GL605J0AH",
+    "model": "SM-S948U",
+    "android": "16",
+    "collector_versionName": "0.1.0",
+    "bnn_package": "us.bnn.newsapp"
+  },
+  "apk": {
+    "path": "artifacts/NFA-Notification-Collector.apk",
+    "sha256": "1fbc6b9e0698650f685c169eccf5ab834f397739326caf9680f9f02c13f7d81f"
+  },
+  "privilege_probe": {
+    "notification_access_collector": true,
+    "listener_bound": true,
+    "reliability_fgs": true,
+    "deviceidle_whitelist": ["com.nfaalerts.collector", "us.bnn.newsapp"],
+    "run_any_in_background": {"collector": "allow", "bnn": "allow"},
+    "app_idle": {"collector": false, "bnn": false},
+    "tailscale_icmp": "ok"
+  },
+  "shade_inventory_vs_room": {
+    "active_bnn_child_notifications": 49,
+    "already_in_collector_db": 49,
+    "misses": 0,
+    "newest_active_postTime_local": "2026-10-01 14:24:00",
+    "note": "BNN Incidents UI is not used as capture authority; only status-bar notifications from us.bnn.newsapp."
+  },
+  "code_changes": [
+    "active notification catch-up on listener connect via getActiveNotifications",
+    "5-minute requestRebind + delivery watchdog in CollectorReliabilityService",
+    "NLS default_autobind and default_filter_types metadata",
+    "skip system AUTOGROUP_SUMMARY LOCAL_ONLY wrappers",
+    "docs INSTALL-SAMSUNG / TROUBLESHOOTING / DECISIONS anchors / RISK_REGISTER / SERVER_READINESS"
+  ],
+  "acceptance": {
+    "locked_screen_15m": "partial — screen Dozing for ~4 minutes then Awake; no new BNN status-bar posts arrived during the window",
+    "ingest_202_during_lock": "blocked_no_new_bnn_notification",
+    "shade_vs_room_match": "49/49 active BNN child notifications already in Room before lock window",
+    "airplane_catchup": "not_run",
+    "reboot_reconnect": "not_run_this_session",
+    "install_rebind": "verified — after APK replace, NLS hasBound=true and onListenerConnected=1"
+  }
+}

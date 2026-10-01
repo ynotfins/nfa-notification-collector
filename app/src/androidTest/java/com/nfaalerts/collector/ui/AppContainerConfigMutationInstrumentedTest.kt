@@ -58,6 +58,8 @@ class AppContainerConfigMutationInstrumentedTest {
 
                 assertTrue(errors.isEmpty())
                 assertEquals("boundary-device", repository.settingsDraft().deviceId)
+                assertEquals("bnn", repository.sourceIdForPackage("us.bnn.newsapp"))
+                assertEquals("local", repository.sourceIdForPackage("com.example.other"))
                 assertTrue(repository.formattedConfig().contains("futureSafe"))
                 assertTrue(checks.get() >= 4)
             } finally {

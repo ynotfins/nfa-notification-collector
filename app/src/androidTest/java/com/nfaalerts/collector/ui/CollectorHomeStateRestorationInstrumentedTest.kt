@@ -41,7 +41,7 @@ class CollectorHomeStateRestorationInstrumentedTest {
         restorationTester.emulateSavedInstanceStateRestore()
 
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
-        composeRule.onNodeWithText("Secure token entry").assertDoesNotExist()
+        composeRule.onNodeWithText("Enter bearer token").assertDoesNotExist()
         composeRule.onNodeWithText("transient-secret").assertDoesNotExist()
         composeRule.runOnIdle {
             assertTrue(

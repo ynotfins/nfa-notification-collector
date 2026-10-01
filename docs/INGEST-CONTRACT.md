@@ -1,6 +1,11 @@
 # NFA Ingest Contract — Android Client View
 
-Verified against `D:\nfa-alerts-database` and live state on 2026-08-17.
+Authority: `D:\github\nfa-platform\DATABASE.md` §10 and `D:\github\nfa-platform\scripts\ingest-gateway.ts`.
+If this file drifts, **nfa-platform wins**. Sheets export schemas are not the phone POST body.
+
+## Why this collector exists
+
+Never miss BNN notifications. Persist every selected notification in Room first. Drain ordered HTTPS posts to the PC over Tailscale. The phone never parses, dedupes, geocodes, or routes — the server does.
 
 ## Boundary
 
@@ -10,7 +15,6 @@ Android never connects to PostgreSQL. It sends HTTPS requests to the existing ga
 - Local PC-only URL: `http://127.0.0.1:8787/v1/ingest/alerts`
 - Expected private phone URL: `https://chaoscentral.tailb71e7e.ts.net/v1/ingest/alerts`
 - Do not use `127.0.0.1` from Android; that is the phone itself.
-- `PHONE_TAILSCALE_ENDPOINT_READY = NO` at bootstrap. Do not claim otherwise without a real phone test.
 
 ## Required headers
 
@@ -20,7 +24,7 @@ Authorization: Bearer <device-specific token>
 X-NFA-Schema-Version: 1
 ```
 
-The bearer is a 43-character opaque base64url token entered in the app UI. It is stored only through the Android secure-secret design. Never use `NFA_INGEST_DB_PASSWORD` or any PostgreSQL credential on Android.
+The bearer is entered in the app UI and stored only through the Android Keystore-backed design. Never use database credentials on Android.
 
 ## Current schema-v1 body
 
@@ -35,13 +39,13 @@ The bearer is a 43-character opaque base64url token entered in the app UI. It is
 }
 ```
 
-Rules:
+Rules (aligned to live gateway):
 
 - `schemaVersion` is exactly `1` and matches the header.
-- `source` is currently exactly `bnn` in both the live TypeScript validator and PostgreSQL constraints/function.
+- `source` is currently exactly `bnn` (BNN-only). Non-BNN stays local `BLOCKED_CONTRACT` — never fake `source=bnn`.
 - `deviceId` is 1–128 characters matching `[A-Za-z0-9._:-]` and must match the credential binding.
 - `capturedAt` is omitted/null or offset-aware ISO-8601.
-- `rawText` is required; empty is allowed; U+0000 is forbidden.
+- `rawText` is required. **Empty / whitespace-only is invalid → HTTP 400 quarantine.** Unresolved template variables like `{not_text_big}` also → 400.
 - `metadata` is omitted or a JSON object.
 
 ## Hard transport bounds
@@ -63,25 +67,25 @@ The collector keeps the full safe notification envelope locally. Its wire projec
 
 ## Delivery result policy
 
-| Result | Collector action |
-|---|---|
-| `202` | Mark SENT only after validating `accepted`, UUID `ingestId`, and UTC `receivedAt` |
-| Network/timeout | Retry with bounded exponential backoff and jitter |
-| `429` | Retry later; the current gateway does not send `Retry-After` |
-| `503` | Retry later; commit or database outcome was not confirmed |
-| `401` | Pause delivery until token/config changes; do not retry forever |
-| `400`, `413`, `415` | Quarantine as permanent/configuration failure; preserve local row |
+| Result | Collector action | Operator label |
+|---|---|---|
+| `202` | Mark SENT only after validating `accepted`, UUID `ingestId`, and UTC `receivedAt` | Done |
+| Network/timeout | Retry with bounded exponential backoff and jitter | Will retry |
+| `429` | Retry later; current gateway does not send `Retry-After` | Will retry |
+| `503` | Retry later; commit or database outcome was not confirmed | Will retry |
+| `401` | Pause delivery until token/config changes | Will retry (token/device) |
+| `400`, `413`, `415` | Quarantine as permanent failure; preserve local row | Needs fix |
 
-Duplicates are retained. A stable `clientEventId` belongs in metadata for provenance, but it is not a server idempotency key; a response-loss retry can create another server row.
+Duplicates are retained. A stable `clientEventId` belongs in metadata for provenance, but it is not a server idempotency key.
+
+## Daily contract sync
+
+The collector reloads the published contract about once per 24 hours (idle-friendly). Preferred publish path:
+
+`D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`
+
+Until that file exists, the daily check re-reads DATABASE.md §10 + ingest-gateway rules against this document and the bundled snapshot. New contract versions apply on next app start / next daily tick. In-flight outbox rows keep the `contractVersion` stamped at insert time — no mid-send hot-swap.
 
 ## Multi-source decision gate
 
-The requested app picker supports up to ten applications, but the live top-level source contract is BNN-only. Before a second source is sent live, obtain operator approval for a bounded backward-compatible gateway/database migration. Recommended proposal:
-
-- retain schema version 1 and the same envelope;
-- accept 1–128 lowercase source characters matching `[a-z0-9][a-z0-9._:-]{0,127}`;
-- pass the validated source into the commit function instead of hardcoding `bnn`;
-- preserve all existing BNN behavior, hashes, append-only triggers, authentication, and least privileges;
-- deploy a new immutable gateway release and test old/new payloads.
-
-This repository must not apply that server change itself.
+The app picker supports up to ten applications, but live transport is BNN-only until nfa-platform expands allowed sources. This repository must not change the server contract.

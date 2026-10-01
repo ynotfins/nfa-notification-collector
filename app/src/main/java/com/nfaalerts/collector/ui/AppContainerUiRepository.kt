@@ -12,6 +12,7 @@ import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.data.CollectorStatusAggregate
+import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.security.BearerLoadState
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import kotlinx.coroutines.CoroutineScope
@@ -85,15 +86,19 @@ class AppContainerUiRepository internal constructor(
                 bearer,
             )
         }
+    private val coreWithRuntime =
+        combine(coreState, container.lastDrainAt) { core, lastDrainAt ->
+            core.copy(lastDrainAt = lastDrainAt)
+        }
 
     override val state: StateFlow<CollectorUiSnapshot> =
         combine(
-            coreState,
+            coreWithRuntime,
             platform.notificationAccess,
             platform.connectivity,
-            platform.battery,
+            platform.reliability,
             verifiedKey,
-        ) { core, access, connectivity, battery, verified ->
+        ) { core, access, connectivity, reliability, verified ->
             val config = core.config
             val document = config?.document ?: CollectorConfigCodec().defaultDocument()
             val enabledSourceCount = core.selections.count(SourceSelection::enabled)
@@ -132,14 +137,26 @@ class AppContainerUiRepository internal constructor(
                 readiness = readiness,
                 endpoint = document.config.activeEndpoint.baseUrl,
                 deviceId = document.config.deviceId,
+                theme = document.config.theme,
                 selectedCount = core.selections.size,
-                queueCount = facts.nonSentCount,
+                queueCount = facts.sendableCount,
+                sendableCount = facts.sendableCount,
+                heldBlockedCount = facts.heldBlockedCount,
+                heldQuarantinedCount = facts.heldQuarantinedCount,
                 listenerState = if (core.listener.connected) "Connected" else "Disconnected",
+                listenerConnected = core.listener.connected,
                 lastCapture = facts.lastCaptureAtEpochMillis?.toString() ?: "Unknown",
                 lastSend = facts.lastSentAtEpochMillis?.toString() ?: "Unknown",
+                lastDrain = core.lastDrainAt?.toString() ?: "Unknown",
                 lastError = facts.latestSafeError ?: "None",
                 networkState = networkLabel,
-                batteryState = battery.label(),
+                batteryState = reliability.battery.label(),
+                batteryOptimizationState = reliability.battery,
+                foregroundNotificationState = reliability.foregroundNotification,
+                backgroundActivityState = reliability.backgroundActivity,
+                backgroundActivityLabel = reliability.backgroundActivity.label(),
+                notificationAccessLabel = access.label(),
+                recentsLocked = document.config.reliability.recentsLocked,
                 totalCount = facts.totalCount,
                 queueCountsByState = facts.countsByState,
                 serverReceivedAt = facts.lastServerReceivedAt ?: "Unknown",
@@ -149,6 +166,8 @@ class AppContainerUiRepository internal constructor(
                 notificationAccessState = access,
                 connectivityState = connectivity,
                 canonicalConfigRevision = config?.revisionHash.orEmpty(),
+                bearerSavedAtEpochMillis = core.bearer?.savedAtEpochMillis,
+                bearerRevisionOk = core.bearer?.present == true && core.bearer.revisionFingerprint != null,
                 liveVerificationFingerprint = currentKey,
             )
         }.stateIn(
@@ -216,11 +235,16 @@ class AppContainerUiRepository internal constructor(
                 if (state is BearerLoadState.Present) {
                     val revision = state.revision
                     state.clear()
-                    BearerUiState(present = true, revisionFingerprint = revision)
+                    BearerUiState(
+                        present = true,
+                        revisionFingerprint = revision,
+                        savedAtEpochMillis = state.savedAtEpochMillis,
+                    )
                 } else {
                     BearerUiState(
                         present = false,
                         revisionFingerprint = if (state == BearerLoadState.Missing) 0L else null,
+                        savedAtEpochMillis = null,
                     )
                 }
             }
@@ -238,7 +262,7 @@ class AppContainerUiRepository internal constructor(
             .selections
             .firstOrNull { it.packageName == packageName }
             ?.sourceId
-            ?: "local"
+            ?: if (packageName == BNN_PACKAGE_NAME) "bnn" else "local"
 
     override suspend fun selectedSources(): List<SourceSelection> = container.sourceSelections.snapshot().selections
 
@@ -255,7 +279,16 @@ class AppContainerUiRepository internal constructor(
                     safeFailure = it.lastErrorCode,
                     serverId = it.serverIngestId,
                     occurredAt = it.capturedAtEpochMillis,
-                    redactedPreview = "Notification content redacted",
+                    redactedPreview =
+                        when {
+                            it.state == DeliveryState.QUARANTINED && !it.quarantinePreview.isNullOrBlank() -> {
+                                "Rejected text preview: ${it.quarantinePreview}"
+                            }
+                            it.state == DeliveryState.QUARANTINED -> {
+                                "Needs fix — open preview for rejected raw text (row kept forever until operator policy)"
+                            }
+                            else -> "Notification content redacted"
+                        },
                 )
             }
         }
@@ -365,6 +398,8 @@ class AppContainerUiRepository internal constructor(
 
     override suspend fun retry(eventId: String): Boolean = container.retryDeliveryFromUi(eventId)
 
+    override suspend fun flushNow(): Int = container.flushDeliveryFromUi()
+
     private fun ConfigMutationOutcome.errors(): List<ConfigValidationError> =
         when (this) {
             is ConfigMutationOutcome.Rejected -> {
@@ -424,8 +459,22 @@ class AppContainerUiRepository internal constructor(
     private fun BatteryOptimizationState.label() =
         when (this) {
             BatteryOptimizationState.Exempt -> "Unrestricted"
-            BatteryOptimizationState.Optimized -> "Optimization active"
+            BatteryOptimizationState.Optimized -> "Optimized (fix required)"
             BatteryOptimizationState.Unknown -> "Unknown"
+        }
+
+    private fun BackgroundActivityState.label() =
+        when (this) {
+            BackgroundActivityState.Allowed -> "Allowed"
+            BackgroundActivityState.Restricted -> "Restricted by Samsung/Android (fix required)"
+            BackgroundActivityState.Unknown -> "Unknown"
+        }
+
+    private fun NotificationAccessState.label() =
+        when (this) {
+            NotificationAccessState.Granted -> "On"
+            NotificationAccessState.Required -> "Off (fix required)"
+            NotificationAccessState.Unknown -> "Unknown"
         }
 
     private fun verificationMessage(
@@ -476,6 +525,8 @@ class AppContainerUiRepository internal constructor(
     }
 }
 
+private const val BNN_PACKAGE_NAME = "us.bnn.newsapp"
+
 private data class UiConfigState(
     val document: CollectorConfigDocument,
     val valid: Boolean,
@@ -485,6 +536,7 @@ private data class UiConfigState(
 private data class BearerUiState(
     val present: Boolean,
     val revisionFingerprint: Long?,
+    val savedAtEpochMillis: Long?,
 )
 
 private data class CoreUiState(
@@ -493,4 +545,5 @@ private data class CoreUiState(
     val selections: List<SourceSelection>,
     val config: UiConfigState?,
     val bearer: BearerUiState?,
+    val lastDrainAt: Long? = null,
 )

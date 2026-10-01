@@ -99,7 +99,7 @@ class DeliveryDrainWorker(
         container.deliveryScheduler.onWorkerStarted()
         return try {
             container.recoverExpiredSending()
-            container.deliveryCoordinator.drainAvailable("worker-$id")
+            container.runDeliveryDrain("worker-$id")
             container.runDeliveryMaintenance()
             Result.success()
         } finally {

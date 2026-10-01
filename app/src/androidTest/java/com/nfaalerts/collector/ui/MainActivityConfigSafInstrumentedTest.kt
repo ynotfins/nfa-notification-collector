@@ -2,7 +2,6 @@ package com.nfaalerts.collector.ui
 
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -44,8 +43,10 @@ class MainActivityConfigSafInstrumentedTest {
             val imported = importedPayload()
             composeRule.activity.importConfiguration(ConfigTestProvider.seed("imported", imported, context))
             waitForPersistedDevice("imported-device")
-            settingsScrollTo(hasTestTag("device-id-form"))
-            composeRule.onNodeWithTag("device-id-form").assertTextContains("imported-device")
+            settingsScrollTo(hasText("Custom (imported-device)"))
+            composeRule.onNodeWithText("Custom (imported-device)").assertIsDisplayed()
+            settingsScrollTo(hasText("Advanced JSON…"))
+            composeRule.onNodeWithText("Advanced JSON…").performClick()
             settingsScrollTo(hasTestTag("json-config-editor"))
             val jsonText =
                 composeRule
@@ -56,7 +57,10 @@ class MainActivityConfigSafInstrumentedTest {
             assertTrue(jsonText.contains("futureSafe"))
 
             settingsScrollTo(hasTestTag("device-id-form"))
-            composeRule.onNodeWithTag("device-id-form").performTextReplacement("form-device")
+            composeRule.onNodeWithTag("device-id-form").performClick()
+            composeRule.onNodeWithText("Custom…").performClick()
+            settingsScrollTo(hasTestTag("custom-device-id-editor"))
+            composeRule.onNodeWithTag("custom-device-id-editor").performTextReplacement("form-device")
             settingsScrollTo(hasText("Save settings forms"))
             composeRule.onNodeWithText("Save settings forms").performClick()
             waitForPersistedDevice("form-device")
@@ -72,10 +76,12 @@ class MainActivityConfigSafInstrumentedTest {
             )
 
             composeRule.onNodeWithText("Sources").performClick()
-            composeRule.onNodeWithText("Sources (1 / 10)").assertIsDisplayed()
-            composeRule
-                .onNodeWithText("Imported Source (com.example.imported) — Enabled; other")
-                .assertIsDisplayed()
+            composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Notification sources"))
+            composeRule.onNodeWithText("Notification sources").assertIsDisplayed()
+            composeRule.onNodeWithTag("sources-list").performScrollToNode(hasText("Imported Source"))
+            composeRule.onNodeWithText("Imported Source").assertIsDisplayed()
+            composeRule.onNodeWithText("com.example.imported").assertIsDisplayed()
+            composeRule.onNodeWithText("Capture: On · Contract source: other").assertIsDisplayed()
             composeRule.onNodeWithText("Settings").performClick()
 
             val oversize = ByteArray(CollectorConfigCodec.MAX_PAYLOAD_BYTES + 1) { 'x'.code.toByte() }

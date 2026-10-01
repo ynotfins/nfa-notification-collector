@@ -24,6 +24,10 @@ data class ListenerStatus(
     val initializationOverflowCount: Long = 0,
     val initializationBufferDepth: Int = 0,
     val initializationMaximumBufferDepth: Int = 0,
+    val catchUpExaminedCount: Long = 0,
+    val catchUpImportedCount: Long = 0,
+    val catchUpSkippedExistingCount: Long = 0,
+    val lastCatchUpAtEpochMillis: Long? = null,
 )
 
 interface CaptureDispatchDiagnostics {
@@ -47,7 +51,8 @@ interface InitializationCaptureDiagnostics {
 class ListenerStatusRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : CaptureDispatchDiagnostics,
-    InitializationCaptureDiagnostics {
+    InitializationCaptureDiagnostics,
+    CatchUpDiagnostics {
     private val mutableState = MutableStateFlow(ListenerStatus())
     val state: StateFlow<ListenerStatus> = mutableState.asStateFlow()
 
@@ -57,6 +62,17 @@ class ListenerStatusRepository(
 
     fun onListenerDisconnected() {
         mutableState.update { it.copy(connected = false, lastDisconnectedAtEpochMillis = clock()) }
+    }
+
+    override fun onCatchUpFinished(result: CatchUpResult) {
+        mutableState.update {
+            it.copy(
+                catchUpExaminedCount = it.catchUpExaminedCount + result.examined.toLong(),
+                catchUpImportedCount = it.catchUpImportedCount + result.imported.toLong(),
+                catchUpSkippedExistingCount = it.catchUpSkippedExistingCount + result.skippedExisting.toLong(),
+                lastCatchUpAtEpochMillis = clock(),
+            )
+        }
     }
 
     override fun onDispatchStarted() {

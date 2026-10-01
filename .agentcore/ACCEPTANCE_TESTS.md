@@ -22,9 +22,11 @@
 | AT-M5-2 | M5 | Payload fits limits with explicit projection markers | UTF-8 measurements | pending | |
 | AT-M6-1 | M6 | Full tests/lint/static/dependency/build gates pass | command logs | pending | |
 | AT-M6-2 | M6 | Debug APK path/hash verified | artifact + SHA-256 | pending | |
-| AT-M6-3 | M6 | APK installed on exact Samsung when connected | ADB evidence | pending | |
-| AT-M6-4 | M6 | Real BNN captured locally and committed remotely | phone/local/server comparison | pending | |
+| AT-M6-3 | M6 | APK installed on exact Samsung when connected | ADB evidence | passed | SM-S948U `R3GL605J0AH`; `com.nfaalerts.collector` 0.1.0; `.agentcore/evidence/reliability-hardening-2026-10-01.json` |
+| AT-M6-4 | M6 | Real BNN status-bar notifications captured locally and committed remotely under locked idle | phone/local/server comparison + locked ≥15m | open | Shade inventory 49/49 already in Room (2026-10-01); locked idle with a *new* BNN post + HTTPS 202 still required — BNN Incidents UI alone is not acceptance |
 | AT-M6-5 | M6 | Second source passes only after server approval | decision + evidence | pending | |
 | AT-M7-1 | M7 | Operational docs, Git, ledger and handoff complete | final review/commits | pending | |
 
 Device/Tailscale rows may be `blocked_external`; they prevent corresponding live claims but not offline APK completion.
+
+Anti-drift: do not mark AT-M6-4 passed from compile/install success, ping-only Tailscale checks, or BNN Incidents UI screenshots without matching `us.bnn.newsapp` status-bar notification + outbox + ingest `202` evidence.

@@ -35,6 +35,22 @@ class ManifestSecurityContractTest {
 
         assertEquals(0, permissionCount(main, "android.permission.QUERY_ALL_PACKAGES"))
         assertEquals(1, permissionCount(parse(debugManifest), "android.permission.QUERY_ALL_PACKAGES"))
+        assertEquals(1, permissionCount(main, "android.permission.RECEIVE_BOOT_COMPLETED"))
+        assertEquals(1, permissionCount(main, "android.permission.FOREGROUND_SERVICE"))
+        assertEquals(1, permissionCount(main, "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"))
+        assertEquals(1, permissionCount(main, "android.permission.POST_NOTIFICATIONS"))
+
+        val reliabilityService = namedElement(main, "service", ".CollectorReliabilityService")
+        assertEquals("false", reliabilityService.getAttributeNS(ANDROID_NS, "exported"))
+        assertEquals("specialUse", reliabilityService.getAttributeNS(ANDROID_NS, "foregroundServiceType"))
+        val restartReceiver = namedElement(main, "receiver", ".CollectorRestartReceiver")
+        val restartActions =
+            (0 until restartReceiver.getElementsByTagName("action").length).map { index ->
+                (restartReceiver.getElementsByTagName("action").item(index) as Element)
+                    .getAttributeNS(ANDROID_NS, "name")
+            }
+        assertTrue(restartActions.contains("android.intent.action.BOOT_COMPLETED"))
+        assertTrue(restartActions.contains("android.intent.action.MY_PACKAGE_REPLACED"))
 
         assertLegacyRules(parse(backupRules))
         assertDataExtractionRules(parse(extractionRules))
@@ -54,6 +70,15 @@ class ManifestSecurityContractTest {
                 setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
             }.newDocumentBuilder()
             .parse(ByteArrayInputStream(xml.toByteArray(StandardCharsets.UTF_8)))
+
+    private fun namedElement(
+        document: Document,
+        tagName: String,
+        androidName: String,
+    ): Element =
+        (0 until document.documentElement.getElementsByTagName(tagName).length)
+            .map { index -> document.documentElement.getElementsByTagName(tagName).item(index) as Element }
+            .single { it.getAttributeNS(ANDROID_NS, "name") == androidName }
 
     private fun permissionCount(
         document: Document,

@@ -15,7 +15,7 @@ import androidx.sqlite.execSQL
         CaptureRetentionTombstoneEntity::class,
         DiagnosticEventEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class NfaCollectorDatabase : RoomDatabase() {
@@ -41,6 +41,15 @@ abstract class NfaCollectorDatabase : RoomDatabase() {
                 }
             }
 
+        val MIGRATION_2_3 =
+            object : Migration(2, 3) {
+                override suspend fun migrate(connection: SQLiteConnection) {
+                    connection.execSQL(
+                        "ALTER TABLE delivery_outbox ADD COLUMN contractVersion TEXT NOT NULL DEFAULT 'unknown'",
+                    )
+                }
+            }
+
         fun create(
             context: Context,
             databaseName: String = DATABASE_NAME,
@@ -50,7 +59,7 @@ abstract class NfaCollectorDatabase : RoomDatabase() {
                     context.applicationContext,
                     NfaCollectorDatabase::class.java,
                     databaseName,
-                ).addMigrations(MIGRATION_1_2)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

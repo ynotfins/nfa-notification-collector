@@ -37,6 +37,12 @@ class WireProjector(
     ): WireProjectionResult {
         if (capture.sourceId != BNN_SOURCE) return WireProjectionResult.BlockedContract
         val rawText = capture.rawText.orEmpty()
+        if (rawText.trim().isEmpty()) {
+            return WireProjectionResult.Quarantined("EMPTY_RAW_TEXT", 0)
+        }
+        if (UNRESOLVED_TEMPLATE.matches(rawText.trim())) {
+            return WireProjectionResult.Quarantined("UNRESOLVED_TEMPLATE_RAW_TEXT", rawText.length)
+        }
         if ('\u0000' in rawText) return WireProjectionResult.Quarantined("WIRE_RAW_TEXT_NUL", 1)
         val rawBytes = rawText.toByteArray(StandardCharsets.UTF_8).size
         if (rawBytes > RAW_TEXT_LIMIT) {
@@ -303,6 +309,7 @@ class WireProjector(
     companion object {
         private const val BNN_SOURCE = "bnn"
         private const val RAW_TEXT_LIMIT = 131_072
+        private val UNRESOLVED_TEMPLATE = Regex("^\\{[a-z0-9_]+\\}$", RegexOption.IGNORE_CASE)
         private const val METADATA_LIMIT = 32_768
         private const val BODY_LIMIT = 262_144
         private const val MAX_STRING_BYTES = 8_192

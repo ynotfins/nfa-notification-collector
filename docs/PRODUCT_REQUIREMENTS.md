@@ -2,13 +2,23 @@
 
 This is the normalized product contract derived from the operator input at `docs/input/OPERATOR_PRODUCT_GOAL_2026-08-17.md`, reconciled with verified server/toolchain state. If this summary conflicts with live authority or `AGENTS.md`, stop and resolve the conflict; do not silently follow the older input.
 
+## Why this product exists
+
+Never miss BNN notifications on the Samsung primary phone. Persist every selected notification in a durable Room outbox, then drain ordered HTTPS posts to the PC over Tailscale. The phone never parses BNN, never invents counties/FIPS, never routes entitlements, and never talks to PostgreSQL. Success is every selected notification in Room, then `POST /v1/ingest/alerts` with `202`, in capture order, under Doze/Samsung pressure, with soak readiness toward 100,000 alerts without silent drops.
+
 ## Outcome
 
 Produce an installable native Android utility for a Samsung Galaxy S26 Ultra that captures notifications from up to ten user-selected applications, persists every event locally, and reliably sends a bounded raw notification projection to the existing NFA ingest gateway.
 
 Package/application ID: `com.nfaalerts.collector`
 
-The phone performs capture and reliable transport only. Parsing and downstream business logic remain on the PC.
+**Contract authority (nfa-platform wins):**  
+1. `D:\github\nfa-platform\DATABASE.md` § Permanent Phone API Contract  
+2. `D:\github\nfa-platform\scripts\ingest-gateway.ts`  
+3. Preferred machine file when published: `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`  
+4. Local mirror: `docs/INGEST-CONTRACT.md` + `docs/contracts/phone-alerts.contract.snapshot.json`  
+
+The phone daily-checks the published contract (~24h). Until the nfa-platform JSON exists, it reconciles against DATABASE.md + ingest-gateway. Do not hot-swap mid-send; stamp `contractVersion` on each outbox row at insert.
 
 ## Architecture
 

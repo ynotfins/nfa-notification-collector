@@ -15,11 +15,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,7 +37,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -42,13 +45,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nfaalerts.collector.config.InstalledApp
 import com.nfaalerts.collector.ui.settings.EndpointProfileDraft
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import com.nfaalerts.collector.ui.sources.SourcePickerScreen
+import com.nfaalerts.collector.ui.theme.RgdsSemanticColors
+import com.nfaalerts.collector.ui.theme.RgdsTheme
+import com.nfaalerts.collector.ui.theme.RgdsThemeMode
+import com.nfaalerts.collector.data.DeliveryState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 @Composable
 fun CollectorHomeScreen(
@@ -56,6 +68,8 @@ fun CollectorHomeScreen(
     openNotificationAccessSettings: () -> Unit,
     openBatterySettings: () -> Unit,
     modifier: Modifier = Modifier,
+    requestForegroundNotificationPermission: () -> Unit = {},
+    openAppDetailsSettings: () -> Unit = {},
     requestImport: () -> Unit = {},
     requestExport: () -> Unit = {},
     requestDiagnosticsExport: () -> Unit = {},
@@ -64,6 +78,7 @@ fun CollectorHomeScreen(
     var tokenEntryRequested by remember { mutableStateOf(false) }
     val destination = CollectorDestination.valueOf(destinationName)
     val snapshot by repository.state.collectAsStateWithLifecycle()
+    val spacing = RgdsTheme.spacing
     Scaffold(
         modifier = modifier.fillMaxSize(),
         bottomBar = {
@@ -72,21 +87,25 @@ fun CollectorHomeScreen(
                     NavigationBarItem(
                         selected = destination == item,
                         onClick = { destinationName = item.name },
-                        icon = {},
-                        label = { Text(item.name) },
-                        modifier = Modifier.semantics { contentDescription = "Open ${item.name}" },
+                        icon = {
+                            RgdsCardBadge(item.label.take(1), size = spacing.iconXl)
+                        },
+                        label = { Text(item.label) },
+                        modifier = Modifier.semantics { contentDescription = "Open ${item.label}" },
                     )
                 }
             }
         },
     ) { padding ->
         if (snapshot.loading) {
-            Text("Loading collector status", modifier = Modifier.padding(padding).padding(24.dp))
+            Text("Loading collector status", modifier = Modifier.padding(padding).padding(spacing.xl))
         } else {
             when (destination) {
                 CollectorDestination.Status -> {
                     StatusScreen(
+                        repository = repository,
                         snapshot = snapshot,
+                        openDestination = { target -> destinationName = target.name },
                         onGuidedAction = { step ->
                             when (step) {
                                 GuidedSetupStep.Access -> {
@@ -115,8 +134,9 @@ fun CollectorHomeScreen(
                                 }
                             }
                         },
-                        verify = { repository.verify() },
                         openBatterySettings = openBatterySettings,
+                        requestForegroundNotificationPermission = requestForegroundNotificationPermission,
+                        openAppDetailsSettings = openAppDetailsSettings,
                         Modifier.padding(padding),
                     )
                 }
@@ -126,7 +146,7 @@ fun CollectorHomeScreen(
                 }
 
                 CollectorDestination.Delivery -> {
-                    DeliveryScreen(repository, requestDiagnosticsExport, Modifier.padding(padding))
+                    DeliveryScreen(repository, snapshot, requestDiagnosticsExport, Modifier.padding(padding))
                 }
 
                 CollectorDestination.Settings -> {
@@ -139,6 +159,8 @@ fun CollectorHomeScreen(
                         { tokenEntryRequested = false },
                         openNotificationAccessSettings,
                         openBatterySettings,
+                        requestForegroundNotificationPermission,
+                        openAppDetailsSettings,
                         Modifier.padding(padding),
                     )
                 }
@@ -149,84 +171,240 @@ fun CollectorHomeScreen(
 
 @Composable
 private fun StatusScreen(
+    repository: CollectorUiRepository,
     snapshot: CollectorUiSnapshot,
+    openDestination: (CollectorDestination) -> Unit,
     onGuidedAction: (GuidedSetupStep) -> Unit,
-    verify: suspend () -> Boolean,
     openBatterySettings: () -> Unit,
+    requestForegroundNotificationPermission: () -> Unit,
+    openAppDetailsSettings: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val spacing = RgdsTheme.spacing
+    val colors = RgdsTheme.colors
+    var flushMessage by remember { mutableStateOf<String?>(null) }
+    val access = snapshot.notificationAccessState.presentation()
+    val setupFacts =
+        "Notification access: ${snapshot.notificationAccessLabel}. Battery: ${snapshot.batteryState}. " +
+            "Background: ${snapshot.backgroundActivityLabel}. Reliability notification: " +
+            "${snapshot.foregroundNotificationState}. Listener: ${snapshot.listenerState}. " +
+            if (snapshot.notificationAccessState == NotificationAccessState.Unknown) access.safeExplanation else ""
+    val setupAction =
+        when {
+            snapshot.guidedStep != GuidedSetupStep.Ready -> {
+                snapshot.guidedStep.actionLabel() to { onGuidedAction(snapshot.guidedStep) }
+            }
+
+            snapshot.batteryOptimizationState != BatteryOptimizationState.Exempt -> {
+                "Review battery setting" to openBatterySettings
+            }
+
+            snapshot.backgroundActivityState != BackgroundActivityState.Allowed -> {
+                "Review background setting" to openAppDetailsSettings
+            }
+
+            snapshot.foregroundNotificationState == ForegroundNotificationState.Required -> {
+                "Allow reliability notification" to requestForegroundNotificationPermission
+            }
+
+            !snapshot.listenerConnected -> {
+                "Reconnect notification access" to { onGuidedAction(GuidedSetupStep.Access) }
+            }
+
+            else -> {
+                null
+            }
+        }
     LazyColumn(
-        modifier = modifier.padding(16.dp).testTag("status-list"),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier.padding(spacing.md).testTag("status-list"),
+        verticalArrangement = Arrangement.spacedBy(spacing.cardGap),
     ) {
-        item { Text("Status", modifier = Modifier.semantics { heading() }) }
-        if (snapshot.guidedStep == GuidedSetupStep.Ready) {
-            item {
-                Surface(
-                    color = Color(0xFFD8F3DC),
-                    contentColor = Color(0xFF176B2C),
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .testTag("collector-ready-container")
-                            .semantics { stateDescription = "Collector ready" },
-                ) {
-                    Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("✓", modifier = Modifier.semantics { contentDescription = "Ready status icon" })
-                        Text("Ready — required setup and local verification are complete")
-                    }
-                }
-            }
-        } else {
-            item { Text("Setup required") }
-            item { Text("Guided setup: ${snapshot.guidedStep}") }
-            item {
-                Button(
-                    onClick = {
-                        if (snapshot.guidedStep == GuidedSetupStep.Verify) {
-                            scope.launch { verify() }
-                        } else {
-                            onGuidedAction(snapshot.guidedStep)
-                        }
-                    },
-                    modifier = Modifier.sizeIn(minHeight = 48.dp),
-                ) {
-                    Text(snapshot.guidedStep.actionLabel())
-                }
-            }
-            item { Text(snapshot.verificationMessage) }
-        }
-        val access = snapshot.notificationAccessState.presentation()
-        item { Text("Notification access: ${access.label}") }
-        if (snapshot.notificationAccessState == NotificationAccessState.Unknown) {
-            item { Text(access.safeExplanation) }
-        }
-        item { Text("Battery reliability: ${snapshot.batteryState}") }
+        item { Text("Home", modifier = Modifier.semantics { heading() }) }
         item {
-            Button(onClick = openBatterySettings, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
-                Text("Open battery settings")
+            HomeTile(
+                title = "Setup health",
+                summary =
+                    if (snapshot.operationallyHealthy) {
+                        "All required collector checks are green"
+                    } else {
+                        "Action needed"
+                    },
+                tip =
+                    setupFacts +
+                        " Checks endpoint, token, device ID, and sources. Recents Keep open is optional.",
+                containerColor =
+                    if (snapshot.operationallyHealthy) {
+                        colors.successContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                contentColor =
+                    if (snapshot.operationallyHealthy) {
+                        colors.onSuccessContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
+                actionLabel = setupAction?.first,
+                onAction = setupAction?.second,
+                modifier =
+                    Modifier
+                        .testTag("collector-ready-container")
+                        .semantics {
+                            stateDescription =
+                                if (snapshot.operationallyHealthy) "Collector ready" else "Setup required"
+                        },
+            )
+        }
+        item {
+            HomeTile(
+                title = "Sources",
+                summary = "${snapshot.selectedCount} of 10 selected",
+                tip =
+                    "BNN is first-class. Other apps are captured locally as BLOCKED_CONTRACT until the PC " +
+                        "contract approves their source IDs.",
+                containerColor = colors.infoContainer,
+                contentColor = colors.onInfoContainer,
+                actionLabel = "Manage sources",
+                onAction = { openDestination(CollectorDestination.Sources) },
+            )
+        }
+        item {
+            HomeTile(
+                title = "Queue",
+                summary =
+                    if (snapshot.sendableCount > 0) {
+                        "${snapshot.sendableCount} sending soon · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    } else if (snapshot.heldCount > 0) {
+                        "0 sending · ${snapshot.heldCount} held (not a send backlog) · ${snapshot.totalCount} captured"
+                    } else {
+                        "Caught up · ${snapshot.totalCount} captured"
+                    },
+                tip =
+                    "Sendable rows drain in capture order. Held = blocked by contract or needs fix (quarantine). " +
+                        "Send now only attempts sendable rows.",
+                containerColor =
+                    if (snapshot.sendableCount > 0) colors.warningContainer else colors.successContainer,
+                contentColor =
+                    if (snapshot.sendableCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
+                actionLabel = "Open outbox",
+                onAction = { openDestination(CollectorDestination.Delivery) },
+            )
+        }
+        item {
+            HomeTile(
+                title = "Send now",
+                summary = flushMessage ?: "Drain sendable rows only",
+                tip =
+                    "Does not move Held (blocked/quarantined) rows. Blocked stay local until the PC allows " +
+                        "that source. Quarantined stay until the reject reason is fixed.",
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                actionLabel = "Flush sendable now",
+                onAction = {
+                    scope.launch {
+                        val attempted = repository.flushNow()
+                        flushMessage = "$attempted sendable item(s) attempted in capture order"
+                    }
+                },
+            )
+        }
+        item {
+            HomeTile(
+                title = "Settings",
+                summary = snapshot.endpoint,
+                tip =
+                    "One active endpoint, one Keystore-backed bearer, safe presets, and advanced controls " +
+                        "when needed.",
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                actionLabel = "Open settings",
+                onAction = { openDestination(CollectorDestination.Settings) },
+            )
+        }
+        item {
+            HomeTile(
+                title = "Tips",
+                summary = "Durable after Room write",
+                tip =
+                    "Android can miss notifications while force-stopped or while Notification Access is off. " +
+                        "Once Room persists a capture, ordered replay protects it for well beyond 48 hours. " +
+                        "Samsung Recents Keep open is optional.",
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                actionLabel = "Open app details",
+                onAction = openAppDetailsSettings,
+            )
+        }
+        item { Text("Live details", modifier = Modifier.semantics { heading() }) }
+        statusFacts(snapshot)
+    }
+}
+
+@Composable
+private fun HomeTile(
+    title: String,
+    summary: String,
+    tip: String,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color,
+    actionLabel: String?,
+    onAction: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    RgdsCard(
+        title = title,
+        subtitle = summary,
+        badgeLabel = title.take(2),
+        containerColor = containerColor,
+        contentColor = contentColor,
+        modifier = modifier,
+    ) {
+        Text("Tip: $tip", style = MaterialTheme.typography.bodyMedium)
+        if (actionLabel != null && onAction != null) {
+            Button(
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+            ) {
+                Text(actionLabel)
             }
         }
-        statusFacts(snapshot)
     }
 }
 
 private fun LazyListScope.statusFacts(snapshot: CollectorUiSnapshot) {
     item { Text("Endpoint: ${snapshot.endpoint}") }
     item { Text("Selected sources: ${snapshot.selectedCount}") }
-    item { Text("Queue: ${snapshot.queueCount}") }
+    item { Text("Sendable now: ${snapshot.sendableCount}") }
+    item { Text("Held (blocked): ${snapshot.heldBlockedCount}") }
+    item { Text("Needs fix (quarantine): ${snapshot.heldQuarantinedCount}") }
     item { Text("Captured total: ${snapshot.totalCount}") }
     snapshot.queueCountsByState.forEach { (state, count) ->
-        item { Text("${state.name}: $count") }
+        val label =
+            when (state) {
+                DeliveryState.SENT -> "Done"
+                DeliveryState.PENDING, DeliveryState.SENDING -> "Sending"
+                DeliveryState.RETRY_WAIT, DeliveryState.PAUSED_AUTH -> "Will retry"
+                DeliveryState.BLOCKED_CONTRACT -> "Held"
+                DeliveryState.QUARANTINED -> "Needs fix"
+            }
+        item { Text("$label ($state): $count") }
     }
     item { Text("Listener: ${snapshot.listenerState}") }
+    item { Text("Battery: ${snapshot.batteryState}") }
+    item { Text("Background: ${snapshot.backgroundActivityLabel}") }
     item { Text("Last capture: ${snapshot.lastCapture}") }
     item { Text("Last send: ${snapshot.lastSend}") }
+    item { Text("Last drain: ${snapshot.lastDrain}") }
     item { Text("Server received: ${snapshot.serverReceivedAt}") }
     item { Text("Last error: ${snapshot.lastError}") }
     item { Text("Network: ${snapshot.networkState}") }
 }
+
+private data class InstalledAppsLoad(
+    val loading: Boolean = true,
+    val apps: List<InstalledApp> = emptyList(),
+)
 
 @Composable
 private fun SourcesScreen(
@@ -235,17 +413,23 @@ private fun SourcesScreen(
     modifier: Modifier,
 ) {
     val pickerAccess = repository as? SourcePickerUiAccess
-    val apps by produceState(emptyList(), pickerAccess) { value = pickerAccess?.sourcePickerApps() ?: emptyList() }
+    var refreshKey by remember { mutableStateOf(0) }
+    val appLoad by produceState(InstalledAppsLoad(), pickerAccess, refreshKey) {
+        value = InstalledAppsLoad(loading = false, apps = pickerAccess?.sourcePickerApps() ?: emptyList())
+    }
+    val spacing = RgdsTheme.spacing
     if (pickerAccess == null) {
-        Column(modifier.padding(16.dp)) {
+        Column(modifier.padding(spacing.md)) {
             Text("Sources (${snapshot.selectedCount} / 10)", modifier = Modifier.semantics { heading() })
             Text("Sources unavailable")
         }
     } else {
         SourcePickerScreen(
-            apps = apps,
+            apps = appLoad.apps,
             repository = pickerAccess.sourceSelectionRepository,
+            appsLoading = appLoad.loading,
             sourceIdForPackage = pickerAccess::sourceIdForPackage,
+            refreshApps = { refreshKey += 1 },
             modifier = modifier,
         )
     }
@@ -254,62 +438,166 @@ private fun SourcesScreen(
 @Composable
 private fun DeliveryScreen(
     repository: CollectorUiRepository,
+    snapshot: CollectorUiSnapshot,
     requestDiagnosticsExport: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val spacing = RgdsTheme.spacing
+    val colors = RgdsTheme.colors
     var privacyEventId by remember { mutableStateOf<String?>(null) }
     var envelope by remember { mutableStateOf<EnvelopePageState?>(null) }
+    var flushMessage by remember { mutableStateOf<String?>(null) }
     val rows by repository.deliveryRows().collectAsStateWithLifecycle(emptyList())
     val diagnostics by repository.diagnosticRows().collectAsStateWithLifecycle(emptyList())
     val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
     val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
     LazyColumn(
-        modifier = modifier.padding(16.dp).testTag("delivery-list"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.padding(spacing.md).testTag("delivery-list"),
+        verticalArrangement = Arrangement.spacedBy(spacing.metadataGap),
     ) {
-        item { Text("Recent delivery", modifier = Modifier.semantics { heading() }) }
-        item { Text("Previews are redacted. Capture records are immutable.") }
+        item {
+            Text(
+                "Queue & delivery",
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
+        item {
+            Text(
+                "Every selected notification is written to Room first. Cards remain immutable and replay in capture order.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        item {
+            RgdsCard(
+                title = "Outbox health",
+                subtitle =
+                    if (snapshot.sendableCount > 0) {
+                        "${snapshot.sendableCount} sending soon · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    } else {
+                        "0 sending · ${snapshot.heldCount} held · ${snapshot.totalCount} captured"
+                    },
+                badgeLabel = "Q",
+                containerColor = if (snapshot.sendableCount > 0) colors.warningContainer else colors.successContainer,
+                contentColor =
+                    if (snapshot.sendableCount > 0) colors.onWarningContainer else colors.onSuccessContainer,
+            ) {
+                Text("Last ordered drain: ${snapshot.lastDrain}")
+                Text(
+                    "Held blocked: ${snapshot.heldBlockedCount} · Needs fix: ${snapshot.heldQuarantinedCount}. " +
+                        "Send now only drains sendable rows.",
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val attempted = repository.flushNow()
+                            flushMessage = "Flush completed: $attempted sendable item(s) attempted in capture order."
+                        }
+                    },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                            .testTag("flush-now"),
+                ) {
+                    Text("Send sendable alerts now")
+                }
+                flushMessage?.let { Text(it) }
+            }
+        }
+        if (rows.isEmpty()) {
+            item {
+                RgdsEmptyState(
+                    title = "No captured notifications yet",
+                    message = "Choose BNN or another source, then wait for its next notification.",
+                    badgeLabel = "0",
+                ) {
+                    Text("Tip: Preview and delivery actions appear only after Room has persisted a real capture.")
+                }
+            }
+        } else {
+            item {
+                Button(
+                    onClick = { privacyEventId = rows.first().eventId },
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) {
+                    Text("Preview latest capture")
+                }
+            }
+        }
         items(rows, key = { it.eventId }) { row ->
-            Column {
-                Text("${row.sourceId} · ${row.packageName}")
+            val presentation = deliveryPresentation(row.state, colors)
+            RgdsCard(
+                title = "${row.sourceId.uppercase()} delivery",
+                subtitle = row.packageName,
+                badgeLabel = presentation.badge,
+                containerColor = presentation.container,
+                contentColor = presentation.content,
+                modifier = Modifier.testTag("delivery-card-${row.eventId}"),
+            ) {
+                Text("State: ${presentation.label}", style = MaterialTheme.typography.titleMedium)
                 Text("Captured: ${row.occurredAt}")
-                Text("${row.state} · attempts ${row.attempts} · HTTP ${row.httpStatus ?: "Unknown"}")
-                Text("Failure: ${row.safeFailure ?: "None"}; server: ${row.serverId ?: "None"}")
-                Text(row.redactedPreview)
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Attempts: ${row.attempts} · HTTP: ${row.httpStatus ?: "Not received"}")
+                if (row.safeFailure != null) Text("Reject/reason code: ${row.safeFailure}")
+                if (row.state == "QUARANTINED") {
+                    Text(row.redactedPreview)
+                    Text(
+                        "400/413/415 quarantines stay on-device for evidence. They are not a send backlog " +
+                            "and Send now will not move them.",
+                    )
+                }
+                if (row.serverId != null) Text("Server receipt: ${row.serverId}")
+                if (row.state == "RETRY_WAIT") {
+                    Button(
+                        onClick = { scope.launch { repository.retry(row.eventId) } },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                                .semantics { contentDescription = "Retry delivery ${row.eventId}" },
+                    ) { Text("Retry this delivery") }
                     TextButton(
                         onClick = { privacyEventId = row.eventId },
                         modifier =
                             Modifier
-                                .sizeIn(minHeight = 48.dp)
+                                .fillMaxWidth()
+                                .sizeIn(minHeight = RgdsTheme.spacing.touchTarget)
                                 .semantics { contentDescription = "View local envelope for ${row.eventId}" },
-                    ) {
-                        Text("View local envelope")
-                    }
-                    if (row.state == "RETRY_WAIT") {
-                        TextButton(
-                            onClick = { scope.launch { repository.retry(row.eventId) } },
-                            modifier =
-                                Modifier
-                                    .sizeIn(minHeight = 48.dp)
-                                    .semantics { contentDescription = "Retry delivery ${row.eventId}" },
-                        ) { Text("Retry eligible delivery") }
-                    }
+                    ) { Text("View private local envelope") }
+                } else {
+                    Button(
+                        onClick = { privacyEventId = row.eventId },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .sizeIn(minHeight = RgdsTheme.spacing.buttonXl)
+                                .semantics { contentDescription = "View local envelope for ${row.eventId}" },
+                    ) { Text("View delivery details") }
                 }
             }
         }
-        item { Text("Diagnostics", modifier = Modifier.semantics { heading() }) }
+        item { Text("Safe diagnostics", modifier = Modifier.semantics { heading() }) }
         item {
-            Button(
-                onClick = requestDiagnosticsExport,
-                modifier = Modifier.sizeIn(minHeight = 48.dp),
-            ) { Text("Export safe diagnostics") }
+            RgdsCard(
+                title = "Diagnostics export",
+                subtitle = "Secret-free health and retry evidence",
+                badgeLabel = "LOG",
+            ) {
+                Text("Tip: Diagnostics omit bearer values and private notification content.")
+                Button(
+                    onClick = requestDiagnosticsExport,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text("Export safe diagnostics") }
+                transferFeedback?.let { Text(it) }
+            }
         }
-        transferFeedback?.let { message -> item { Text(message) } }
         items(diagnostics, key = { it.diagnosticId }) { row ->
-            Column {
-                Text("${row.eventCode} · ${row.createdAt}")
+            RgdsCard(
+                title = row.eventCode,
+                subtitle = row.createdAt.toString(),
+                badgeLabel = "LOG",
+            ) {
                 Text(row.safeDetails)
             }
         }
@@ -341,11 +629,11 @@ private fun DeliveryScreen(
             text = {
                 LazyColumn(
                     modifier = Modifier.testTag("envelope-dialog-list"),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap),
                 ) {
                     item { Text("Envelope page ${state.currentPage + 1} / ${state.pageCount}") }
                     item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap)) {
                             TextButton(
                                 onClick = { envelope = state.previous() },
                                 enabled = state.currentPage > 0,
@@ -364,6 +652,63 @@ private fun DeliveryScreen(
     }
 }
 
+private data class DeliveryPresentation(
+    val label: String,
+    val badge: String,
+    val container: androidx.compose.ui.graphics.Color,
+    val content: androidx.compose.ui.graphics.Color,
+)
+
+@Composable
+private fun deliveryPresentation(
+    state: String,
+    colors: RgdsSemanticColors,
+): DeliveryPresentation =
+    when (state) {
+        "SENT" -> {
+            DeliveryPresentation("Done", "OK", colors.successContainer, colors.onSuccessContainer)
+        }
+
+        "PENDING", "SENDING" -> {
+            DeliveryPresentation("Sending", "Q", colors.infoContainer, colors.onInfoContainer)
+        }
+
+        "RETRY_WAIT" -> {
+            DeliveryPresentation("Will retry", "!", colors.warningContainer, colors.onWarningContainer)
+        }
+
+        "PAUSED_AUTH" -> {
+            DeliveryPresentation("Will retry (token/device)", "!", colors.warningContainer, colors.onWarningContainer)
+        }
+
+        "BLOCKED_CONTRACT" -> {
+            DeliveryPresentation(
+                "Held — not allowed by current ingest contract",
+                "HOLD",
+                MaterialTheme.colorScheme.secondaryContainer,
+                MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+
+        "QUARANTINED" -> {
+            DeliveryPresentation(
+                "Needs fix — server rejected (kept for evidence)",
+                "FIX",
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+
+        else -> {
+            DeliveryPresentation(
+                "Needs fix",
+                "!",
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+    }
+
 @Composable
 private fun SettingsScreen(
     repository: CollectorUiRepository,
@@ -374,6 +719,8 @@ private fun SettingsScreen(
     onTokenEntryHandled: () -> Unit,
     openNotificationAccessSettings: () -> Unit,
     openBatterySettings: () -> Unit,
+    requestForegroundNotificationPermission: () -> Unit,
+    openAppDetailsSettings: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -385,145 +732,353 @@ private fun SettingsScreen(
     var addProfileName by rememberSaveable { mutableStateOf("") }
     var addProfileBaseUrl by rememberSaveable { mutableStateOf("https://") }
     var addProfilePath by rememberSaveable { mutableStateOf("/v1/ingest/alerts") }
+    var showAdvancedEndpoints by rememberSaveable { mutableStateOf(false) }
+    var showCustomDeviceId by rememberSaveable { mutableStateOf(false) }
+    var showAdvancedJson by rememberSaveable { mutableStateOf(false) }
     val feedbackFlow = remember(repository) { repository.configurationFeedback() ?: MutableStateFlow(null) }
     val transferFeedback by feedbackFlow.collectAsStateWithLifecycle()
+    val reliabilityAction =
+        when {
+            snapshot.notificationAccessState != NotificationAccessState.Granted -> {
+                "Fix notification access" to openNotificationAccessSettings
+            }
+
+            snapshot.batteryOptimizationState != BatteryOptimizationState.Exempt -> {
+                "Fix battery setting" to openBatterySettings
+            }
+
+            snapshot.backgroundActivityState != BackgroundActivityState.Allowed -> {
+                "Fix background setting" to openAppDetailsSettings
+            }
+
+            snapshot.foregroundNotificationState == ForegroundNotificationState.Required -> {
+                "Allow reliability notification" to requestForegroundNotificationPermission
+            }
+
+            else -> {
+                "Review reliability settings" to openBatterySettings
+            }
+        }
     LaunchedEffect(repository, snapshot.canonicalConfigRevision) {
         draft = repository.settingsDraft()
         editor = repository.formattedConfig()
     }
     LazyColumn(
-        modifier = modifier.padding(16.dp).testTag("settings-list"),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.padding(RgdsTheme.spacing.md).testTag("settings-list"),
+        verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.sm),
     ) {
         item { Text("Connection settings", modifier = Modifier.semantics { heading() }) }
-        item { Text("Active HTTPS endpoint: ${snapshot.endpoint}. Profiles do not fail over automatically.") }
-        item {
-            Button(
-                onClick = {
-                    tokenWarning = null
-                    tokenEntry = true
-                },
-                modifier = Modifier.sizeIn(minHeight = 48.dp),
-            ) { Text("Enter token") }
-        }
-        tokenWarning?.let { warning -> item { Text(warning) } }
-        item { Button(onClick = openNotificationAccessSettings) { Text("Open notification access settings") } }
-        item { Button(onClick = openBatterySettings) { Text("Open battery settings") } }
-        item { Text("Endpoint profiles") }
-        draft?.profiles?.let { profiles ->
-            items(profiles, key = EndpointProfileDraft::name) { profile ->
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Profile: ${profile.name}${if (draft?.activeProfile == profile.name) " (active)" else ""}")
-                    OutlinedTextField(
-                        profile.baseUrl,
-                        { value -> draft = draft?.updateProfile(profile.name) { it.copy(baseUrl = value) } },
-                        label = { Text("HTTPS origin for ${profile.name}") },
-                    )
-                    OutlinedTextField(
-                        profile.ingestPath,
-                        { value -> draft = draft?.updateProfile(profile.name) { it.copy(ingestPath = value) } },
-                        label = { Text("Ingest path for ${profile.name}") },
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(
-                            onClick = { draft = draft?.copy(activeProfile = profile.name) },
-                            modifier =
-                                Modifier.semantics {
-                                    contentDescription = "Select active profile ${profile.name}"
-                                },
-                        ) {
-                            Text("Select active")
+        draft?.let { current ->
+            item {
+                SettingsDropdown(
+                    label = "Theme",
+                    currentValue = current.theme,
+                    options = RgdsThemeMode.entries.map { SettingOption(it.displayName, it.dataTheme) },
+                    tip = "Changes all RGDS colors immediately. Exactly four approved themes are available.",
+                    onSelected = { selected ->
+                        scope.launch {
+                            val outcome = repository.saveSettings(current.copy(theme = selected))
+                            resultText = outcome.safeMessage()
+                            if (outcome.persisted) draft = repository.settingsDraft()
                         }
+                    },
+                )
+            }
+            item {
+                SettingsDropdown(
+                    label = "Endpoint profile",
+                    currentValue = current.activeProfile,
+                    options =
+                        current.profiles.map { profile ->
+                            SettingOption(profile.displayName(), profile.name)
+                        },
+                    tip =
+                        "Tailscale (production) is the default. Android loopback is the phone itself, and " +
+                            "cleartext HTTP is disabled. Use the custom editor only for an approved HTTPS gateway.",
+                    onSelected = { selected ->
+                        scope.launch {
+                            val outcome = repository.saveSettings(current.copy(activeProfile = selected))
+                            resultText = outcome.safeMessage()
+                            if (outcome.persisted) draft = repository.settingsDraft()
+                        }
+                    },
+                )
+            }
+        }
+        item {
+            RgdsCard(
+                title = "Ingest authentication",
+                subtitle = snapshot.tokenStatusLabel(),
+                badgeLabel = "KEY",
+                containerColor =
+                    if (snapshot.readiness.bearerSaved && snapshot.bearerRevisionOk) {
+                        RgdsTheme.colors.successContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                contentColor =
+                    if (snapshot.readiness.bearerSaved && snapshot.bearerRevisionOk) {
+                        RgdsTheme.colors.onSuccessContainer
+                    } else {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    },
+            ) {
+                Text("Tip: The saved token is never redisplayed. Replace opens a fresh secure editor.")
+                Button(
+                    onClick = {
+                        tokenWarning = null
+                        tokenEntry = true
+                    },
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text(if (snapshot.readiness.bearerSaved) "Replace token" else "Enter token") }
+                tokenWarning?.let { Text(it) }
+            }
+        }
+        item {
+            RgdsCard(
+                title = "Reliability & permissions",
+                subtitle =
+                    "Access ${snapshot.notificationAccessLabel} · Battery ${snapshot.batteryState} · " +
+                        "Background ${snapshot.backgroundActivityLabel} · Listener ${snapshot.listenerState}",
+                badgeLabel = if (snapshot.operationallyHealthy) "OK" else "!",
+                containerColor =
+                    if (snapshot.operationallyHealthy) {
+                        RgdsTheme.colors.successContainer
+                    } else {
+                        RgdsTheme.colors.warningContainer
+                    },
+                contentColor =
+                    if (snapshot.operationallyHealthy) {
+                        RgdsTheme.colors.onSuccessContainer
+                    } else {
+                        RgdsTheme.colors.onWarningContainer
+                    },
+            ) {
+                Text(
+                    "Home and Settings use the same OS checks. Battery must say Unrestricted and Background " +
+                        "must say Allowed — any Optimized/Restricted is a reliability bug on this phone.",
+                )
+                Button(
+                    onClick = reliabilityAction.second,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+                ) { Text(reliabilityAction.first) }
+                TextButton(
+                    onClick = openNotificationAccessSettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("Notification Access details") }
+                TextButton(
+                    onClick = openBatterySettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("Battery settings details") }
+                TextButton(
+                    onClick = openAppDetailsSettings,
+                    modifier = Modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.touchTarget),
+                ) { Text("App background details") }
+            }
+        }
+        item {
+            TextButton(onClick = { showAdvancedEndpoints = !showAdvancedEndpoints }) {
+                Text(if (showAdvancedEndpoints) "Hide custom endpoint editor" else "Custom / edit endpoint…")
+            }
+        }
+        if (showAdvancedEndpoints) {
+            item {
+                Text(
+                    "Tip: Custom endpoints must be approved HTTPS origins. Saving an invalid profile is blocked.",
+                )
+            }
+            draft?.profiles?.let { profiles ->
+                items(profiles, key = EndpointProfileDraft::name) { profile ->
+                    RgdsCard(
+                        title = profile.displayName(),
+                        subtitle = profile.baseUrl,
+                        badgeLabel = "URL",
+                    ) {
+                        OutlinedTextField(
+                            profile.baseUrl,
+                            { value -> draft = draft?.updateProfile(profile.name) { it.copy(baseUrl = value) } },
+                            label = { Text("HTTPS origin for ${profile.name}") },
+                        )
+                        OutlinedTextField(
+                            profile.ingestPath,
+                            { value -> draft = draft?.updateProfile(profile.name) { it.copy(ingestPath = value) } },
+                            label = { Text("Ingest path for ${profile.name}") },
+                        )
                         TextButton(
                             onClick = { draft = draft?.removeProfile(profile.name) },
                             enabled = (draft?.profiles?.size ?: 0) > 1,
-                            modifier = Modifier.semantics { contentDescription = "Remove profile ${profile.name}" },
+                            modifier =
+                                Modifier.semantics {
+                                    contentDescription = "Remove profile ${profile.name}"
+                                },
                         ) { Text("Remove profile") }
                     }
                 }
             }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Add endpoint profile")
-                OutlinedTextField(addProfileName, { addProfileName = it }, label = { Text("Profile name") })
-                OutlinedTextField(addProfileBaseUrl, { addProfileBaseUrl = it }, label = { Text("HTTPS origin") })
-                OutlinedTextField(addProfilePath, { addProfilePath = it }, label = { Text("Ingest path") })
-                TextButton(onClick = {
-                    val current = draft
-                    if (current == null || addProfileName.isBlank()) {
-                        resultText = "/endpointProfiles: PROFILE_NAME_REQUIRED — Profile name is required."
-                    } else if (current.profiles.any { it.name == addProfileName }) {
-                        resultText =
-                            "/endpointProfiles/${addProfileName.rfc6901()}: DUPLICATE_PROFILE — Profile already exists."
-                    } else {
-                        draft =
-                            current.copy(
-                                profiles =
-                                    current.profiles +
-                                        EndpointProfileDraft(addProfileName, addProfileBaseUrl, addProfilePath),
-                            )
-                        resultText = ""
-                    }
-                }) { Text("Add profile") }
+            item {
+                RgdsCard(
+                    title = "Add custom HTTPS profile",
+                    subtitle = "Advanced gateway configuration",
+                    badgeLabel = "NEW",
+                ) {
+                    OutlinedTextField(addProfileName, { addProfileName = it }, label = { Text("Profile name") })
+                    OutlinedTextField(addProfileBaseUrl, { addProfileBaseUrl = it }, label = { Text("HTTPS origin") })
+                    OutlinedTextField(addProfilePath, { addProfilePath = it }, label = { Text("Ingest path") })
+                    TextButton(onClick = {
+                        val current = draft
+                        if (current == null || addProfileName.isBlank()) {
+                            resultText = "/endpointProfiles: PROFILE_NAME_REQUIRED — Profile name is required."
+                        } else if (current.profiles.any { it.name == addProfileName }) {
+                            resultText =
+                                "/endpointProfiles/${addProfileName.rfc6901()}: DUPLICATE_PROFILE — Profile already exists."
+                        } else {
+                            draft =
+                                current.copy(
+                                    profiles =
+                                        current.profiles +
+                                            EndpointProfileDraft(addProfileName, addProfileBaseUrl, addProfilePath),
+                                )
+                            resultText = "Custom profile added to the draft. Save settings forms to apply it."
+                        }
+                    }) { Text("Add custom profile") }
+                }
             }
         }
         draft?.let { current ->
             item {
-                OutlinedTextField(
-                    current.deviceId,
-                    { draft = current.copy(deviceId = it) },
-                    label = { Text("Device ID") },
-                    modifier = Modifier.fillMaxWidth().testTag("device-id-form"),
+                RgdsCard(
+                    title = "Samsung Recents",
+                    subtitle = "Optional convenience — never a readiness gate",
+                    badgeLabel = "OPT",
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Keep open selected", style = MaterialTheme.typography.titleMedium)
+                        Switch(
+                            checked = current.recentsLocked,
+                            onCheckedChange = { draft = current.copy(recentsLocked = it) },
+                            modifier =
+                                Modifier.semantics {
+                                    stateDescription =
+                                        if (current.recentsLocked) "Optional tip enabled" else "Optional tip disabled"
+                                },
+                        )
+                    }
+                }
+            }
+            item {
+                val deviceOptions =
+                    buildList {
+                        add(SettingOption("Primary phone", "nfa-primary-phone"))
+                        if (current.deviceId != "nfa-primary-phone") {
+                            add(SettingOption("Custom (${current.deviceId})", current.deviceId))
+                        }
+                        add(SettingOption("Custom…", CUSTOM_SETTING_VALUE))
+                    }
+                SettingsDropdown(
+                    label = "Device ID",
+                    currentValue = current.deviceId,
+                    options = deviceOptions,
+                    tip =
+                        "The production credential is bound to nfa-primary-phone. Custom IDs require " +
+                            "matching server credentials.",
+                    onSelected = { selected ->
+                        if (selected == CUSTOM_SETTING_VALUE) {
+                            showCustomDeviceId = true
+                        } else {
+                            draft = current.copy(deviceId = selected)
+                            showCustomDeviceId = false
+                        }
+                    },
+                    modifier = Modifier.testTag("device-id-form"),
+                )
+            }
+            if (showCustomDeviceId) {
+                item {
+                    OutlinedTextField(
+                        current.deviceId,
+                        { draft = current.copy(deviceId = it) },
+                        label = { Text("Custom device ID") },
+                        supportingText = { Text("Tip: Save only after the gateway credential uses this exact ID.") },
+                        modifier = Modifier.fillMaxWidth().testTag("custom-device-id-editor"),
+                    )
+                }
+            }
+            item {
+                SettingsDropdown(
+                    label = "Connect timeout",
+                    currentValue = current.connectTimeoutMs,
+                    options = durationOptions(10_000L, 15_000L, 30_000L, 60_000L),
+                    tip = "How long to wait while opening the HTTPS connection. Default: 15 seconds.",
+                    onSelected = { draft = current.copy(connectTimeoutMs = it) },
                 )
             }
             item {
-                SettingsNumberField("Connect timeout (ms)", current.connectTimeoutMs) {
-                    draft =
-                        current.copy(connectTimeoutMs = it)
-                }
+                SettingsDropdown(
+                    label = "Read timeout",
+                    currentValue = current.readTimeoutMs,
+                    options = durationOptions(15_000L, 30_000L, 60_000L, 120_000L),
+                    tip = "How long to wait for the gateway response. Default: 30 seconds.",
+                    onSelected = { draft = current.copy(readTimeoutMs = it) },
+                )
             }
             item {
-                SettingsNumberField("Read timeout (ms)", current.readTimeoutMs) {
-                    draft =
-                        current.copy(readTimeoutMs = it)
-                }
+                SettingsDropdown(
+                    label = "Initial retry backoff",
+                    currentValue = current.initialBackoffMs,
+                    options = durationOptions(30_000L, 60_000L, 300_000L, 900_000L),
+                    tip = "First delay after an offline or retryable failure. Queue order remains fixed.",
+                    onSelected = { draft = current.copy(initialBackoffMs = it) },
+                )
             }
             item {
-                SettingsNumberField("Initial backoff (ms)", current.initialBackoffMs) {
-                    draft =
-                        current.copy(initialBackoffMs = it)
-                }
+                SettingsDropdown(
+                    label = "Maximum retry backoff",
+                    currentValue = current.maxBackoffMs,
+                    options = durationOptions(1_800_000L, 3_600_000L, 21_600_000L),
+                    tip = "Caps exponential backoff. Default: 6 hours; durable rows remain until delivered.",
+                    onSelected = { draft = current.copy(maxBackoffMs = it) },
+                )
             }
             item {
-                SettingsNumberField("Maximum backoff (ms)", current.maxBackoffMs) {
-                    draft =
-                        current.copy(maxBackoffMs = it)
-                }
+                SettingsDropdown(
+                    label = "Sent-history retention",
+                    currentValue = current.sentDays,
+                    options = dayOptions(2, 7, 30, 90, 365),
+                    tip =
+                        "Applies only after SENT. Pending, retry, auth-paused, blocked, and quarantined outbox " +
+                            "rows are never pruned, so 48-hour-plus outages remain protected.",
+                    onSelected = { draft = current.copy(sentDays = it) },
+                )
             }
             item {
-                SettingsNumberField(
-                    "SENT retention days",
-                    current.sentDays,
-                ) { draft = current.copy(sentDays = it) }
+                SettingsDropdown(
+                    label = "Maximum stored SENT rows",
+                    currentValue = current.maxSentRows,
+                    options = countOptions(1_000, 5_000, 10_000, 50_000, 100_000),
+                    tip = "Soak-ready default is 100,000 SENT rows. Never removes undelivered work.",
+                    onSelected = { draft = current.copy(maxSentRows = it) },
+                )
             }
             item {
-                SettingsNumberField("Maximum SENT rows", current.maxSentRows) {
-                    draft =
-                        current.copy(maxSentRows = it)
-                }
+                SettingsDropdown(
+                    label = "Diagnostics retention",
+                    currentValue = current.diagnosticsDays,
+                    options = dayOptions(2, 7, 14, 30, 90),
+                    tip = "Keeps bounded secret-free operational diagnostics.",
+                    onSelected = { draft = current.copy(diagnosticsDays = it) },
+                )
             }
             item {
-                SettingsNumberField("Diagnostics retention days", current.diagnosticsDays) {
-                    draft =
-                        current.copy(diagnosticsDays = it)
-                }
-            }
-            item {
-                SettingsNumberField("Maximum diagnostics rows", current.diagnosticsMaxRows) {
-                    draft =
-                        current.copy(diagnosticsMaxRows = it)
-                }
+                SettingsDropdown(
+                    label = "Maximum diagnostics rows",
+                    currentValue = current.diagnosticsMaxRows,
+                    options = countOptions(500, 1_000, 2_000, 5_000, 20_000, 50_000),
+                    tip = "Soak-ready default is 50,000 diagnostics rows. Never removes captures/outbox.",
+                    onSelected = { draft = current.copy(diagnosticsMaxRows = it) },
+                )
             }
             item {
                 Button(onClick = {
@@ -538,50 +1093,59 @@ private fun SettingsScreen(
                 }) { Text("Save settings forms") }
             }
         }
-        item { Text("Advanced non-secret JSON") }
         item {
-            OutlinedTextField(
-                value = editor,
-                onValueChange = { editor = it },
-                label = { Text("Advanced JSON configuration") },
-                modifier = Modifier.fillMaxWidth().testTag("json-config-editor"),
-            )
+            TextButton(onClick = { showAdvancedJson = !showAdvancedJson }) {
+                Text(if (showAdvancedJson) "Hide advanced JSON" else "Advanced JSON…")
+            }
         }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
+        if (showAdvancedJson) {
+            item {
+                Text("Tip: Advanced JSON preserves full power but rejects secrets and invalid configuration.")
+            }
+            item {
+                OutlinedTextField(
+                    value = editor,
+                    onValueChange = { editor = it },
+                    label = { Text("Advanced JSON configuration") },
+                    modifier = Modifier.fillMaxWidth().testTag("json-config-editor"),
+                )
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap)) {
+                    Button(onClick = {
+                        scope.launch {
+                            val errors = repository.validateConfig(editor)
+                            resultText = if (errors.isEmpty()) "Configuration is valid." else errors.display()
+                        }
+                    }) { Text("Validate only") }
+                    Button(onClick = {
+                        scope.launch {
+                            val outcome = repository.saveConfigOutcome(editor)
+                            resultText = outcome.safeMessage()
+                            if (outcome.persisted) {
+                                draft = repository.settingsDraft()
+                                editor = repository.formattedConfig()
+                            }
+                        }
+                    }) { Text("Save / Apply") }
+                }
+            }
+            item {
+                TextButton(onClick = {
                     scope.launch {
-                        val errors = repository.validateConfig(editor)
-                        resultText = if (errors.isEmpty()) "Configuration is valid." else errors.display()
-                    }
-                }) { Text("Validate only") }
-                Button(onClick = {
-                    scope.launch {
-                        val outcome = repository.saveConfigOutcome(editor)
+                        val defaults = repository.defaultSettingsDraft()
+                        val outcome = repository.saveSettings(defaults)
                         resultText = outcome.safeMessage()
                         if (outcome.persisted) {
                             draft = repository.settingsDraft()
                             editor = repository.formattedConfig()
                         }
                     }
-                }) { Text("Save / Apply") }
+                }) { Text("Reset to approved defaults") }
             }
         }
         item {
-            TextButton(onClick = {
-                scope.launch {
-                    val defaults = repository.defaultSettingsDraft()
-                    val outcome = repository.saveSettings(defaults)
-                    resultText = outcome.safeMessage()
-                    if (outcome.persisted) {
-                        draft = repository.settingsDraft()
-                        editor = repository.formattedConfig()
-                    }
-                }
-            }) { Text("Reset to approved defaults") }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap)) {
                 Button(onClick = requestImport) { Text("Import configuration") }
                 Button(onClick = requestExport) { Text("Export configuration") }
             }
@@ -593,6 +1157,7 @@ private fun SettingsScreen(
     if (showTokenEntry || tokenEntry) {
         TokenEntryDialog(
             repository = repository,
+            replacing = snapshot.readiness.bearerSaved,
             dismiss = {
                 tokenEntry = false
                 onTokenEntryHandled()
@@ -643,20 +1208,70 @@ private fun String.pageBoundaries(): List<Int> {
     return boundaries
 }
 
+private const val CUSTOM_SETTING_VALUE = "__custom__"
+
+private data class SettingOption(
+    val label: String,
+    val value: String,
+)
+
 @Composable
-private fun SettingsNumberField(
+private fun SettingsDropdown(
     label: String,
-    value: String,
-    onChange: (String) -> Unit,
+    currentValue: String,
+    options: List<SettingOption>,
+    tip: String,
+    onSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
-    )
+    var expanded by remember { mutableStateOf(false) }
+    val currentLabel = options.firstOrNull { it.value == currentValue }?.label ?: currentValue
+    RgdsCard(
+        title = label,
+        subtitle = currentLabel,
+        badgeLabel = label.take(2),
+    ) {
+        Text("Tip: $tip", style = MaterialTheme.typography.bodyMedium)
+        Button(
+            onClick = { expanded = true },
+            modifier = modifier.fillMaxWidth().sizeIn(minHeight = RgdsTheme.spacing.buttonXl),
+        ) {
+            Text("Change $label")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option.value)
+                    },
+                )
+            }
+        }
+    }
 }
+
+private fun durationOptions(vararg values: Long): List<SettingOption> =
+    values.map { value -> SettingOption(formatDuration(value), value.toString()) }
+
+private fun dayOptions(vararg values: Int): List<SettingOption> =
+    values.map { value -> SettingOption(if (value == 1) "1 day" else "$value days", value.toString()) }
+
+private fun countOptions(vararg values: Int): List<SettingOption> =
+    values.map { value -> SettingOption("${"%,d".format(value)} rows", value.toString()) }
+
+private fun formatDuration(milliseconds: Long): String =
+    when {
+        milliseconds % 3_600_000L == 0L -> "${milliseconds / 3_600_000L} hour(s)"
+        milliseconds % 60_000L == 0L -> "${milliseconds / 60_000L} minute(s)"
+        else -> "${milliseconds / 1_000L} seconds"
+    }
+
+private fun EndpointProfileDraft.displayName(): String = if (name == "tailscale") "Tailscale (production)" else name
 
 private fun SettingsDraft.updateProfile(
     name: String,
@@ -697,33 +1312,116 @@ private fun GuidedSetupStep.actionLabel(): String =
         GuidedSetupStep.Ready -> "Ready"
     }
 
+private const val EXPECTED_BEARER_LENGTH = 43
+private const val MAX_BEARER_INPUT_LENGTH = 128
+private val BEARER_SHAPE = Regex("[A-Za-z0-9_-]{$EXPECTED_BEARER_LENGTH}")
+
+internal fun bearerValidationError(value: String): String? =
+    when {
+        value.isEmpty() -> {
+            "Paste the token before saving."
+        }
+
+        value.length != EXPECTED_BEARER_LENGTH -> {
+            "Token must be exactly $EXPECTED_BEARER_LENGTH characters. Current length: ${value.length}."
+        }
+
+        !BEARER_SHAPE.matches(value) -> {
+            "Token may contain only letters, numbers, hyphens, and underscores."
+        }
+
+        else -> {
+            null
+        }
+    }
+
+private fun CollectorUiSnapshot.tokenStatusLabel(): String =
+    when {
+        !readiness.bearerSaved -> {
+            "Token not saved"
+        }
+
+        !bearerRevisionOk -> {
+            "Token saved · revision check pending"
+        }
+
+        bearerSavedAtEpochMillis == null -> {
+            "Token saved · revision OK"
+        }
+
+        else -> {
+            val formatted =
+                DateTimeFormatter
+                    .ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+                    .withZone(ZoneId.systemDefault())
+                    .format(Instant.ofEpochMilli(bearerSavedAtEpochMillis))
+            "Token saved · last updated $formatted · revision OK"
+        }
+    }
+
 @Composable
 private fun TokenEntryDialog(
     repository: CollectorUiRepository,
+    replacing: Boolean,
     dismiss: () -> Unit,
     onSaved: (String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var token by remember { mutableStateOf("") }
     var tokenError by remember { mutableStateOf("") }
+    var showToken by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     SecureWindowEffect()
     AlertDialog(
         onDismissRequest = dismiss,
-        title = { Text("Secure token entry") },
+        title = { Text(if (replacing) "Replace saved token" else "Enter bearer token") },
         text = {
-            OutlinedTextField(
-                value = token,
-                onValueChange = { token = it },
-                label = { Text("Bearer token") },
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                supportingText = { if (tokenError.isNotBlank()) Text(tokenError) },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(RgdsTheme.spacing.metadataGap)) {
+                Text(
+                    if (replacing) {
+                        "The saved token stays active unless this replacement saves successfully."
+                    } else {
+                        "Paste the 43-character token issued for this device."
+                    },
+                )
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = {
+                        token = it.take(MAX_BEARER_INPUT_LENGTH)
+                        tokenError = ""
+                    },
+                    label = { Text("Bearer token") },
+                    visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            autoCorrectEnabled = false,
+                        ),
+                    trailingIcon = {
+                        TextButton(onClick = { showToken = !showToken }) {
+                            Text(if (showToken) "Hide token" else "Show token")
+                        }
+                    },
+                    supportingText = {
+                        Column {
+                            Text("Length: ${token.length} / $EXPECTED_BEARER_LENGTH")
+                            if (tokenError.isNotBlank()) Text(tokenError)
+                        }
+                    },
+                    modifier = Modifier.testTag("bearer-token-editor"),
+                )
+            }
         },
         confirmButton = {
             TextButton(
                 onClick = {
+                    val validationError = bearerValidationError(token)
+                    if (validationError != null) {
+                        tokenError = validationError
+                        return@TextButton
+                    }
                     val transient = token.toCharArray()
+                    saving = true
                     scope.launch {
                         val outcome =
                             try {
@@ -731,15 +1429,17 @@ private fun TokenEntryDialog(
                             } finally {
                                 transient.fill('\u0000')
                             }
+                        saving = false
                         if (outcome.saved) {
                             token = ""
                             onSaved(outcome.safeWarning)
                         } else {
-                            tokenError = "Token could not be saved."
+                            tokenError = "Token could not be saved. The previous saved token is unchanged."
                         }
                     }
                 },
-            ) { Text("Save token") }
+                enabled = !saving,
+            ) { Text(if (saving) "Saving…" else "Save token") }
         },
         dismissButton = {
             TextButton(onClick = {

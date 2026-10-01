@@ -1,10 +1,17 @@
 package com.nfaalerts.collector
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
+import com.nfaalerts.collector.contract.ContractSyncCoordinator
+import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
+import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
+import com.nfaalerts.collector.capture.LightweightPostedNotification
 import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
+import com.nfaalerts.collector.delivery.DrainPaceLimiter
 import com.nfaalerts.collector.config.AtomicCollectorConfigStore
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigLoadResult
@@ -26,6 +33,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -48,6 +58,20 @@ class NfaCollectorApp : Application() {
         super.onCreate()
         appContainer = AppContainer(this)
         appContainer.initializeOnIo()
+        observeConnectivity()
+    }
+
+    private fun observeConnectivity() {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        runCatching {
+            manager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        appContainer.onConnectivityAvailable()
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -61,6 +85,8 @@ class AppContainer(
     internal val configStore: AtomicCollectorConfigStore = AtomicCollectorConfigStore(application.applicationContext),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mutableLastDrainAt = MutableStateFlow<Long?>(null)
+    val lastDrainAt: StateFlow<Long?> = mutableLastDrainAt.asStateFlow()
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
@@ -82,13 +108,25 @@ class AppContainer(
             settings = ::runtimeDeliverySettings,
             transport = IngestTransport(ingestClient::send),
             scheduler = deliveryScheduler,
+            paceLimiter = DrainPaceLimiter(),
         )
+    }
+    private val contractSync by lazy {
+        ContractSyncCoordinator.create(application.applicationContext) {
+            runCatching {
+                application.applicationContext.assets
+                    .open("INGEST-CONTRACT.md")
+                    .bufferedReader()
+                    .use { it.readText() }
+            }.getOrDefault("")
+        }
     }
     private val captureProcessor: NotificationCaptureProcessor by lazy {
         NotificationCaptureProcessor.createAndroid(
             packageManager = application.packageManager,
             captureWriteDao = { database.captureWriteDao() },
             onPersisted = ::startImmediateDeliveryAfterPersist,
+            contractVersionProvider = { contractSync.activeContractVersion() },
         )
     }
 
@@ -111,6 +149,7 @@ class AppContainer(
         scope.launch(Dispatchers.IO) {
             sourceSelections.load()
             postedNotificationCallback.onSelectionLoadCompleted()
+            runCatching { contractSync.maybeCheck(force = true) }
             recoverDeliveryOnStartup()
         }
     }
@@ -147,6 +186,30 @@ class AppContainer(
         if (changed) deliveryScheduler.ensureScheduled(clock())
         return changed
     }
+
+    internal suspend fun flushDeliveryFromUi(): Int {
+        val now = clock()
+        database.deliveryDao().recoverStaleSending(now)
+        database.deliveryDao().expediteRetryWait(now)
+        deliveryScheduler.ensureScheduled(now)
+        return runDeliveryDrain("manual-$now", maximumClaims = 256)
+    }
+
+    fun onConnectivityAvailable() {
+        val now = clock()
+        deliveryScheduler.ensureScheduled(now)
+        scope.launch { runDeliveryDrain("connectivity-$now", maximumClaims = 32) }
+    }
+
+    suspend fun runDeliveryDrain(
+        owner: String,
+        maximumClaims: Int = 32,
+    ): Int =
+        try {
+            deliveryCoordinator.drainAvailable(owner, maximumClaims)
+        } finally {
+            mutableLastDrainAt.value = clock()
+        }
 
     internal suspend fun exportConfigForUi(): ByteArray = configStore.exportPayload()
 
@@ -191,7 +254,19 @@ class AppContainer(
     private fun startImmediateDeliveryAfterPersist(eventId: String) {
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
-        scope.launch { deliveryCoordinator.drainAvailable("immediate-$eventId", maximumClaims = 1) }
+        scope.launch { runDeliveryDrain("immediate-$eventId", maximumClaims = 1) }
+    }
+
+    suspend fun reconcileActiveNotifications(notifications: List<LightweightPostedNotification>): Int {
+        val catchUp =
+            ActiveNotificationCatchUp(
+                alreadyCaptured = { packageName, key, postTimeEpochMillis ->
+                    database.captureReadDao().existsIdentity(packageName, key, postTimeEpochMillis)
+                },
+                onMissing = postedNotificationCallback::onNotificationPosted,
+                diagnostics = listenerStatus,
+            )
+        return catchUp.reconcile(notifications).imported
     }
 
     private suspend fun runtimeDeliverySettings(): RuntimeDeliverySettings {

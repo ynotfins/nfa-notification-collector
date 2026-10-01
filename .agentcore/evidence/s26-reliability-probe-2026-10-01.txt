@@ -1,0 +1,13 @@
+serial=R3GL605J0AH
+date=Thu Oct  1 16:33:53 EDT 2026
+model=SM-S948U
+release=16
+listeners=ai.affiora.mobileclaw/ai.affiora.mobileclaw.tools.ClawNotificationListener:com.samsung.android.smartsuggestions/com.samsung.android.moneta.datacollector.application.notification.PdeNotificationListenerService:com.pushbullet.android/com.pushbullet.android.notifications.mirroring.NotificationMirroringService:com.arlosoft.macrodroid/com.arlosoft.macrodroid.triggers.services.NotificationServiceOreo:ai.openclaw.app/ai.openclaw.app.node.DeviceNotificationListenerService:com.microsoft.appmanager/com.microsoft.mmx.agents.PhoneNotificationsListenerService:com.samsung.systemui.notilus/com.samsung.systemui.notilus.service.NotificationListener:com.nfaalerts.collector/com.nfaalerts.collector.capture.NfaNotificationListenerService:com.example.alertsheets/com.example.alertsheets.services.AlertsNotificationListener:com.sec.android.app.launcher/com.android.launcher3.notification.NotificationListener:com.samsung.android.smartmirroring/com.samsung.android.smartmirroring.controller.NotificationService
+collector_inactive=Idle=false
+bnn_inactive=Idle=false
+collector_standby=5
+bnn_standby=5
+collector_run_any=RUN_ANY_IN_BACKGROUND: allow
+bnn_run_any=RUN_ANY_IN_BACKGROUND: allow
+whitelist=user,us.bnn.newsapp,10435 user,com.nfaalerts.collector,10665
+services=  * ServiceRecord{d621a74 u0 com.nfaalerts.collector/.capture.NfaNotificationListenerService c:android}       requested=true received=true hasBound=true doRebind=false   * ServiceRecord{5026f21 u0 com.nfaalerts.collector/.CollectorReliabilityService c:com.nfaalerts.collector}     isForeground=true foregroundId=2701 types=0x40000000 foregroundNoti=Notification(channel=collector-reliability shortcut=null contentView=null vibrate=null sound=null defaults=0 flags=ONGOING_EVENT|ONLY_ALERT_ONCE|NO_CLEAR|FOREGROUND_SERVICE color=0x00000000 category=service vis=SECRET semFlags=0x0 semPriority=0 semMissedCount=0 semScenarioType=0)         onNotificationRankingUpdate=0 onNotificationRemovedFull=0 onNotificationPostedFull=11 onListenerConnected=0 
