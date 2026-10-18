@@ -48,17 +48,28 @@ Measured checklist that kept capture alive on SM-S948U (`R3GL605J0AH`):
 6. Lock-screen notifications enabled for BNN.
 7. Collector ongoing reliability notification left enabled.
 8. After disconnect, collector calls `NotificationListenerService.requestRebind`; reliability service repeats rebind on a watchdog interval and boot/package-replaced receivers restart it.
-9. On reconnect, collector reconciles `getActiveNotifications()` and imports only package/key/postTime identities not already in Room.
+9. Live capture stays immediate in `onNotificationPosted`. When the network is down and the listener is still connected, shade catch-up reads `getActiveNotifications()` every 3000 ms (`ShadeReconcilePace.DEGRADED_INTERVAL_MS`). When the listener is disconnected, Android will not allow a shade read; the reliability service asks for a reconnect every 3000 ms, and the app reads the shade once as soon as the listener is back. The same one-time shade read runs when the network returns. While the listener is connected and the network is up, the app does not poll the shade. The periodic shade loop lives in the connected listener and skips shade reads while healthy; disconnect cancels that loop. Imports skip package/key/postTime identities already in Room. Dismissed Notification History rows remain unrecoverable. The `delivery_outbox` drain stays oldest-first: `ORDER BY captured_notifications.postTimeEpochMillis, rowid`. The foreground reliability notice is posted once for package `com.nfaalerts.collector`, group `com.nfaalerts.collector.reliability`; it is not reposted every minute. Durable diagnostics include `LISTENER_CONNECTED`, `LISTENER_DISCONNECTED`, and `captured_notifications.capturePath` values `LIVE`, `SHADE`, and `UNKNOWN` (`UNKNOWN` is the migration default for older rows).
+10. Competing third-party notification listeners (Pushbullet, OpenClaw, Affiora, AlertSheets, Link to Windows mirroring) can be disabled; keep **NFA Collector** and **MacroDroid** (parallel until cutover). MacroDroid is not a substitute for the collector app.
+11. If both MacroDroid and the collector miss the same window, the miss happened before either listener received a callback — check Samsung battery “Never sleeping apps” for collector, MacroDroid, and BNN.
 
 Samsung settings changes are manual. WorkManager can defer work under constraints; queued Room rows remain the delivery authority.
 
 ### Competing listeners
 
-MacroDroid, Pushbullet, OpenClaw/MobileClaw, and `com.example.alertsheets` may also have Notification Access. They are diagnosis aids only. If another listener sees a BNN status-bar notification that collector does not, treat that as a collector defect. Do not make production depend on a third-party mirror.
+MacroDroid is the **allowed parallel backup** until cutover (same ingest contract). Pushbullet, OpenClaw/MobileClaw, and `com.example.alertsheets` may also have Notification Access — diagnosis aids only; disable them on the primary phone when they fight for listener slots. If MacroDroid sees a BNN status-bar notification that collector does not, treat that as a **collector defect**. Do not make production depend on MacroDroid alone.
 
-### BNN UI versus notifications
+### Notification History versus live capture
 
-BNN Incidents UI can list alerts that never appear as Android notifications. Collector can only capture what `us.bnn.newsapp` posts to the notification shade. Compare against active/history status-bar notifications, not the Incidents list alone.
+Android **Settings → Notification history** is proof the OS posted the notification. Neither the collector nor MacroDroid can read that archive (no public API). Compare miss rates like this:
+
+1. Count BNN rows in Notification History for a time window.
+2. Count matching `us.bnn.newsapp` rows in collector Room (`postTime`) for the same window (and MacroDroid `nfa_alerts_24h.jsonl` if enabled).
+3. History ≫ Room ⇒ **listener miss** (not “BNN went quiet,” not an nfa-platform merge gap).
+4. Dismissed history rows **cannot** be recovered later.
+
+### BNN Incidents UI versus notifications
+
+BNN’s **in-app Incidents** list can show items that never appear as Android notifications. That is a different surface from Notification History. Collector can only capture what `us.bnn.newsapp` posts to the notification shade.
 
 ## Safe diagnostics
 

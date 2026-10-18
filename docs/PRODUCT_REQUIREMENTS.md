@@ -12,13 +12,15 @@ Produce an installable native Android utility for a Samsung Galaxy S26 Ultra tha
 
 Package/application ID: `com.nfaalerts.collector`
 
-**Contract authority (nfa-platform wins):**  
-1. `D:\github\nfa-platform\DATABASE.md` § Permanent Phone API Contract  
-2. `D:\github\nfa-platform\scripts\ingest-gateway.ts`  
-3. Preferred machine file when published: `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`  
-4. Local mirror: `docs/INGEST-CONTRACT.md` + `docs/contracts/phone-alerts.contract.snapshot.json`  
+**Contract authority (nfa-platform wins):**
 
-The phone daily-checks the published contract (~24h). Until the nfa-platform JSON exists, it reconciles against DATABASE.md + ingest-gateway. Do not hot-swap mid-send; stamp `contractVersion` on each outbox row at insert.
+1. `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json` (published; current `version` 1.2.0)
+2. `D:\github\nfa-platform\contracts\ingest\phone-alerts.request.schema.json`
+3. `D:\github\nfa-platform\DATABASE.md` § Permanent Phone API Contract
+4. `D:\github\nfa-platform\scripts\ingest-gateway.ts`
+5. Local mirror: `docs/INGEST-CONTRACT.md` + `docs/contracts/phone-alerts.contract.snapshot.json`
+
+The phone daily-checks / reloads the bundled mirror of the published contract (~24h). No dedicated phone HTTP contract route yet — refresh via APK/bundled snapshot when nfa-platform bumps the file. Do not hot-swap mid-send; stamp `contractVersion` on each outbox row at insert.
 
 ## Architecture
 
@@ -42,7 +44,9 @@ Use clear boundaries for notification serialization, configuration, secure secre
 - Declare a real `NotificationListenerService` with `BIND_NOTIFICATION_LISTENER_SERVICE` and the required service intent filter.
 - Provide a prominent button to open Notification Access settings.
 - Detect and display current access status.
-- Never use Accessibility Service or polling as a substitute.
+- Never use Accessibility Service or polling as a substitute for live capture. Do not scrape Settings notification history and do not add an in-app BNN scanner.
+- Live capture stays immediate in `onNotificationPosted`.
+- When the network is down and the listener is still connected, shade catch-up reads `getActiveNotifications()` every 3000 ms (`ShadeReconcilePace.DEGRADED_INTERVAL_MS`). When the listener is disconnected, Android will not allow a shade read; the reliability service asks for a reconnect every 3000 ms, and the app reads the shade once as soon as the listener is back. The same one-time shade read runs when the network returns. While the listener is connected and the network is up, the app does not poll the shade.
 - Leave callback work quickly: snapshot/persist/dispatch; no network or expensive recursive conversion on the callback thread.
 
 ### Source selection
@@ -96,6 +100,7 @@ One unsupported value must not discard the rest of the extras bundle. The local 
 
 - Assign a unique client event UUID to every matching posted event; do not deduplicate repeated Android notification keys or text.
 - Persist before sending.
+- Drain `delivery_outbox` oldest-first: `ORDER BY captured_notifications.postTimeEpochMillis, rowid`.
 - States: `PENDING`, `SENDING`, `SENT`, `RETRY_WAIT`, `FAILED`/quarantined.
 - Record attempt count, next retry, failure classification, HTTP status, server ingest UUID and receive time.
 - `202` is the only success and is accepted only after response validation.
@@ -122,6 +127,8 @@ The collector is green/ready only when notification access, valid endpoint, toke
 - Provide settings intents justified by current official docs and Samsung behavior.
 - Require standard TLS validation; no trust-all code or cleartext operational endpoint.
 - Keep structured diagnostics bounded and secret-free.
+- Durable diagnostics include `LISTENER_CONNECTED`, `LISTENER_DISCONNECTED`, and `captured_notifications.capturePath` values `LIVE`, `SHADE`, and `UNKNOWN` (`UNKNOWN` is the migration default for older rows).
+- Post the foreground reliability notice once for package `com.nfaalerts.collector`, group `com.nfaalerts.collector.reliability`. Do not repost it every minute.
 
 ## Verification requirements
 

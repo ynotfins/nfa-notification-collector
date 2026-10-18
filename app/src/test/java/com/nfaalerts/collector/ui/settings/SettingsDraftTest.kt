@@ -20,8 +20,8 @@ class SettingsDraftTest {
         val reset = changed.resetToApprovedDefaults()
 
         assertEquals("nfa-primary-phone", reset.deviceId)
-        assertEquals("90", reset.sentDays)
-        assertEquals("2000", reset.diagnosticsMaxRows)
+        assertEquals("180", reset.sentDays)
+        assertEquals("50000", reset.diagnosticsMaxRows)
         assertEquals("tailscale", reset.activeProfile)
     }
 

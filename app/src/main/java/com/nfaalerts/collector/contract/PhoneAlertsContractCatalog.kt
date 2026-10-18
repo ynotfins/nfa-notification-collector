@@ -1,14 +1,14 @@
 package com.nfaalerts.collector.contract
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
 
 /**
  * Local snapshot of the published phone ingest contract.
- * Prefer nfa-platform `contracts/ingest/phone-alerts.contract.json` when published;
- * until then this snapshot is derived from DATABASE.md §10 and ingest-gateway.ts.
+ * Authority: nfa-platform `contracts/ingest/phone-alerts.contract.json` (v1.2.0+).
+ * Wire body remains schema-v1 / source=bnn; this catalog stamps outbox `contractVersion`.
  */
 @Serializable
 data class PhoneAlertsContract(
@@ -30,7 +30,8 @@ data class PhoneAlertsContract(
 )
 
 object PhoneAlertsContractCatalog {
-    const val BUNDLED_CONTRACT_VERSION = "2026-10-01.schema-v1.bnn-only"
+    /** Matches nfa-platform contracts/ingest/phone-alerts.contract.json `version`. */
+    const val BUNDLED_CONTRACT_VERSION = "1.2.0"
 
     val bundled: PhoneAlertsContract =
         PhoneAlertsContract(
@@ -54,8 +55,10 @@ object PhoneAlertsContractCatalog {
             retryHttpStatuses = listOf(429, 503),
             pauseAuthHttpStatuses = listOf(401),
             notes =
-                "Authority: nfa-platform DATABASE.md §10 + scripts/ingest-gateway.ts. " +
-                    "Empty/unresolved-template rawText → 400. Non-bnn sources remain local BLOCKED_CONTRACT.",
+                "Authority: nfa-platform contracts/ingest/phone-alerts.contract.json v1.2.0 " +
+                    "(DATABASE.md §10 + scripts/ingest-gateway.ts). " +
+                    "Empty/unresolved-template rawText → 400. Non-bnn sources remain local BLOCKED_CONTRACT. " +
+                    "Shade notifications only — BNN in-app Incidents list is outside this contract.",
         )
 
     private val json = Json { ignoreUnknownKeys = true }

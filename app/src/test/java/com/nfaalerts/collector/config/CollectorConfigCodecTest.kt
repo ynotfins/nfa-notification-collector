@@ -25,10 +25,10 @@ class CollectorConfigCodecTest {
         assertEquals("/v1/ingest/alerts", document.config.activeEndpoint.ingestPath)
         assertEquals(30_000L, document.config.delivery.initialBackoffMs)
         assertEquals(21_600_000L, document.config.delivery.maxBackoffMs)
-        assertEquals(90, document.config.retention.sentDays)
-        assertEquals(10_000, document.config.retention.maxSentRows)
-        assertEquals(14, document.config.diagnostics.retentionDays)
-        assertEquals(2_000, document.config.diagnostics.maxRows)
+        assertEquals(180, document.config.retention.sentDays)
+        assertEquals(100_000, document.config.retention.maxSentRows)
+        assertEquals(90, document.config.diagnostics.retentionDays)
+        assertEquals(50_000, document.config.diagnostics.maxRows)
         assertFalse(document.root.toString().contains("maxAttempts"))
     }
 

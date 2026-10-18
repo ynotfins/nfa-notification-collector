@@ -30,12 +30,12 @@ The bearer is entered in the app UI and stored only through the Android Keystore
 
 ```json
 {
-  "schemaVersion": 1,
-  "source": "bnn",
-  "deviceId": "nfa-primary-phone",
-  "capturedAt": "2026-08-17T07:57:10.755Z",
-  "rawText": "exact exposed notification text",
-  "metadata": {}
+    "schemaVersion": 1,
+    "source": "bnn",
+    "deviceId": "nfa-primary-phone",
+    "capturedAt": "2026-08-17T07:57:10.755Z",
+    "rawText": "exact exposed notification text",
+    "metadata": {}
 }
 ```
 
@@ -50,41 +50,53 @@ Rules (aligned to live gateway):
 
 ## Hard transport bounds
 
-| Item | Limit |
-|---|---:|
-| Complete HTTP body | 262,144 bytes |
-| `rawText` UTF-8 | 131,072 bytes |
-| Serialized metadata UTF-8 | 32,768 bytes |
-| Metadata depth | 6 |
-| Total metadata keys | 128 |
-| Keys in one object | 64 |
-| Entries in one array | 128 |
-| One metadata string UTF-8 | 8,192 bytes |
-| Authenticated rate burst | 240 |
-| Refill | 120/minute/device |
+| Item                      |             Limit |
+| ------------------------- | ----------------: |
+| Complete HTTP body        |     262,144 bytes |
+| `rawText` UTF-8           |     131,072 bytes |
+| Serialized metadata UTF-8 |      32,768 bytes |
+| Metadata depth            |                 6 |
+| Total metadata keys       |               128 |
+| Keys in one object        |                64 |
+| Entries in one array      |               128 |
+| One metadata string UTF-8 |       8,192 bytes |
+| Authenticated rate burst  |               240 |
+| Refill                    | 120/minute/device |
 
 The collector keeps the full safe notification envelope locally. Its wire projection must be deterministic, bounded, and contain explicit omission/truncation markers. Do not silently drop the local original.
 
 ## Delivery result policy
 
-| Result | Collector action | Operator label |
-|---|---|---|
-| `202` | Mark SENT only after validating `accepted`, UUID `ingestId`, and UTC `receivedAt` | Done |
-| Network/timeout | Retry with bounded exponential backoff and jitter | Will retry |
-| `429` | Retry later; current gateway does not send `Retry-After` | Will retry |
-| `503` | Retry later; commit or database outcome was not confirmed | Will retry |
-| `401` | Pause delivery until token/config changes | Will retry (token/device) |
-| `400`, `413`, `415` | Quarantine as permanent failure; preserve local row | Needs fix |
+| Result              | Collector action                                                                  | Operator label            |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------- |
+| `202`               | Mark SENT only after validating `accepted`, UUID `ingestId`, and UTC `receivedAt` | Done                      |
+| Network/timeout     | Retry with bounded exponential backoff and jitter                                 | Will retry                |
+| `429`               | Retry later; current gateway does not send `Retry-After`                          | Will retry                |
+| `503`               | Retry later; commit or database outcome was not confirmed                         | Will retry                |
+| `401`               | Pause delivery until token/config changes                                         | Will retry (token/device) |
+| `400`, `413`, `415` | Quarantine as permanent failure; preserve local row                               | Needs fix                 |
 
 Duplicates are retained. A stable `clientEventId` belongs in metadata for provenance, but it is not a server idempotency key.
 
 ## Daily contract sync
 
-The collector reloads the published contract about once per 24 hours (idle-friendly). Preferred publish path:
+The collector reloads the published contract about once per 24 hours (idle-friendly).
 
-`D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`
+**Published (nfa-platform wins):**
 
-Until that file exists, the daily check re-reads DATABASE.md §10 + ingest-gateway rules against this document and the bundled snapshot. New contract versions apply on next app start / next daily tick. In-flight outbox rows keep the `contractVersion` stamped at insert time — no mid-send hot-swap.
+`D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json` (current `version` **1.2.0**)
+
+Companion request schema:
+
+`D:\github\nfa-platform\contracts\ingest\phone-alerts.request.schema.json`
+
+Best-effort GitHub raw (no dedicated phone HTTP contract route yet):
+
+`https://raw.githubusercontent.com/ynotfins/nfa-platform/integration/commercial-readiness/contracts/ingest/phone-alerts.contract.json`
+
+This repo keeps `docs/contracts/phone-alerts.contract.snapshot.json` and the APK bundled catalog in sync with that published version. New contract versions apply on next app start / next daily tick. In-flight outbox rows keep the `contractVersion` stamped at insert time — no mid-send hot-swap.
+
+**Listener scope:** live capture stays immediate in `onNotificationPosted` (MacroDroid Notification Received is the parallel backup at post time). When the network is down and the listener is still connected, shade catch-up reads `getActiveNotifications()` every 3000 ms. When the listener is disconnected, Android will not allow a shade read; the reliability service asks for a reconnect every 3000 ms, and the app reads the shade once as soon as the listener is back. The same one-time shade read runs when the network returns. While the listener is connected and the network is up, the app does not poll the shade. `delivery_outbox` drain stays oldest-first: `ORDER BY captured_notifications.postTimeEpochMillis, rowid`. Android **Settings → Notification history** proves the OS posted an alert but is **not** readable by the collector — dismissed history cannot be backfilled, and no in-app BNN scanner was added. BNN’s in-app Incidents list is a third surface and may include items that never became shade notifications.
 
 ## Multi-source decision gate
 
