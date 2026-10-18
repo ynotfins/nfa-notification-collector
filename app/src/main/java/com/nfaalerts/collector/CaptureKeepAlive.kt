@@ -36,8 +36,14 @@ class CaptureKeepAliveWorker(
     override suspend fun doWork(): Result {
         if (!hasNotificationAccess(applicationContext)) return Result.success()
         CollectorReliabilityService.update(applicationContext)
+        val connected =
+            (applicationContext as? NfaCollectorApp)
+                ?.appContainer
+                ?.listenerStatus
+                ?.state
+                ?.value
+                ?.connected == true
         val app = applicationContext as? NfaCollectorApp
-        val connected = app?.appContainer?.listenerStatus?.state?.value?.connected == true
         if (!connected) {
             requestCollectorListenerRebind(applicationContext)
         }

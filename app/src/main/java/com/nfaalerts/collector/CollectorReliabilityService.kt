@@ -9,12 +9,14 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationAccessStatus
+import com.nfaalerts.collector.capture.ShadeReconcilePace
 
 class CollectorReliabilityService : Service() {
     private val handler = Handler(Looper.getMainLooper())
@@ -29,9 +31,12 @@ class CollectorReliabilityService : Service() {
                 if (!connected) {
                     requestCollectorListenerRebind(this@CollectorReliabilityService)
                 }
-                (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
-                (application as NfaCollectorApp).appContainer.requestConnectedShadeReconcile()
-                val delayMs = if (connected) WATCHDOG_CONNECTED_INTERVAL_MS else WATCHDOG_DISCONNECTED_INTERVAL_MS
+                val delayMs =
+                    if (connected) {
+                        WATCHDOG_CONNECTED_INTERVAL_MS
+                    } else {
+                        ShadeReconcilePace.DEGRADED_INTERVAL_MS
+                    }
                 handler.postDelayed(this, delayMs)
             }
         }
@@ -51,6 +56,7 @@ class CollectorReliabilityService : Service() {
             },
         )
         startForeground(NOTIFICATION_ID, notification())
+        foregroundPosted = true
     }
 
     override fun onStartCommand(
@@ -66,21 +72,23 @@ class CollectorReliabilityService : Service() {
         if (!listenerConnected()) {
             requestCollectorListenerRebind(this)
         }
-        (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
         handler.removeCallbacks(watchdog)
-        handler.postDelayed(watchdog, WATCHDOG_DISCONNECTED_INTERVAL_MS)
+        handler.postDelayed(watchdog, ShadeReconcilePace.DEGRADED_INTERVAL_MS)
         return START_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdog)
+        foregroundPosted = false
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun listenerConnected(): Boolean =
-        (application as? NfaCollectorApp)?.appContainer?.listenerStatus?.state?.value?.connected == true
+    private fun listenerConnected(): Boolean {
+        val app = application as? NfaCollectorApp ?: return false
+        return app.appContainer.listenerStatus.state.value.connected
+    }
 
     private fun notification(): Notification {
         val contentIntent =
@@ -90,32 +98,44 @@ class CollectorReliabilityService : Service() {
                 Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        return Notification
-            .Builder(this, CHANNEL_ID)
-            .setSmallIcon(com.nfaalerts.collector.R.drawable.ic_collector)
-            .setContentTitle("NFA Collector is protecting capture")
-            .setContentText("Notifications are persisted locally before ordered delivery.")
-            .setContentIntent(contentIntent)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setVisibility(Notification.VISIBILITY_SECRET)
-            .build()
+        val builder =
+            Notification
+                .Builder(this, CHANNEL_ID)
+                .setSmallIcon(com.nfaalerts.collector.R.drawable.ic_collector)
+                .setContentTitle("NFA Collector is protecting capture")
+                .setContentText("Notifications are persisted locally before ordered delivery.")
+                .setContentIntent(contentIntent)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setGroup(GROUP_KEY)
+                .setGroupSummary(false)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+        return builder.build()
     }
 
     companion object {
         private const val CHANNEL_ID = "collector-reliability"
+        private const val GROUP_KEY = "com.nfaalerts.collector.reliability"
         private const val NOTIFICATION_ID = 2701
-        private const val WATCHDOG_CONNECTED_INTERVAL_MS = 60_000L
-        private const val WATCHDOG_DISCONNECTED_INTERVAL_MS = 15_000L
+        private const val WATCHDOG_CONNECTED_INTERVAL_MS = 5 * 60_000L
+
+        @Volatile
+        private var foregroundPosted = false
 
         fun update(context: Context) {
             val intent = Intent(context, CollectorReliabilityService::class.java)
-            if (hasNotificationAccess(context)) {
-                runCatching { context.startForegroundService(intent) }
-            } else {
+            if (!hasNotificationAccess(context)) {
+                foregroundPosted = false
                 context.stopService(intent)
+                return
             }
+            if (foregroundPosted) return
+            runCatching { context.startForegroundService(intent) }
         }
     }
 }

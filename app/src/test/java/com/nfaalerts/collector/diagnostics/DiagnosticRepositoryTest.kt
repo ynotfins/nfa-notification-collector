@@ -58,6 +58,32 @@ class DiagnosticRepositoryTest {
         }
 
     @Test
+    fun listenerAndCapturePathEventsStayInTheDurableDiagnosticLog() =
+        runBlocking {
+            val store = RecordingDiagnosticStore()
+            val repository = DiagnosticRepository(store, clock = { 50L }, idFactory = { "id" })
+
+            assertEquals(
+                DiagnosticRecordResult.Recorded,
+                repository.record("LISTENER_DISCONNECTED", mapOf("listener" to "DISCONNECTED")),
+            )
+            assertEquals(
+                DiagnosticRecordResult.Recorded,
+                repository.record(
+                    "CAPTURE_PERSISTED",
+                    mapOf(
+                        "eventId" to "event-1",
+                        "state" to "SHADE",
+                        "packageName" to "us.bnn.newsapp",
+                    ),
+                ),
+            )
+
+            assertEquals(listOf("LISTENER_DISCONNECTED", "CAPTURE_PERSISTED"), store.rows.map { it.eventCode })
+            assertTrue(store.rows[1].safeDetailsJson.contains("SHADE"))
+        }
+
+    @Test
     fun objectAndArrayValuesAreRejectedRatherThanStringified() =
         runBlocking {
             val store = RecordingDiagnosticStore()

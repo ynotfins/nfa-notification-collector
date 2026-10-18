@@ -3,8 +3,6 @@ package com.nfaalerts.collector
 import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
-import com.nfaalerts.collector.contract.ContractSyncCoordinator
-import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
 import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
 import com.nfaalerts.collector.capture.LightweightPostedNotification
@@ -12,22 +10,27 @@ import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
-import com.nfaalerts.collector.delivery.DrainPaceLimiter
+import com.nfaalerts.collector.capture.ShadeReconcilePace
 import com.nfaalerts.collector.config.AtomicCollectorConfigStore
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigLoadResult
 import com.nfaalerts.collector.config.InstalledAppRepository
 import com.nfaalerts.collector.config.JsonSourceSelectionStore
 import com.nfaalerts.collector.config.SourceSelectionRepository
+import com.nfaalerts.collector.contract.ContractSyncCoordinator
+import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
 import com.nfaalerts.collector.data.CollectorStatusAggregate
 import com.nfaalerts.collector.data.NfaCollectorDatabase
 import com.nfaalerts.collector.delivery.BearerLoad
 import com.nfaalerts.collector.delivery.DeliveryCoordinator
 import com.nfaalerts.collector.delivery.DeliveryWorkScheduler
+import com.nfaalerts.collector.delivery.DrainPaceLimiter
 import com.nfaalerts.collector.delivery.IngestTransport
 import com.nfaalerts.collector.delivery.OkHttpIngestClient
 import com.nfaalerts.collector.delivery.RoomDeliveryStore
 import com.nfaalerts.collector.delivery.RuntimeDeliverySettings
+import com.nfaalerts.collector.diagnostics.DiagnosticRepository
+import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
 import com.nfaalerts.collector.security.AndroidKeystoreBearerStore
 import com.nfaalerts.collector.security.BearerLoadState
 import kotlinx.coroutines.CoroutineScope
@@ -67,12 +70,21 @@ class NfaCollectorApp : Application() {
     }
 
     private fun observeConnectivity() {
-        val manager = getSystemService(ConnectivityManager::class.java)
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        appContainer.setNetworkAvailable(manager.activeNetwork != null)
         runCatching {
             manager.registerDefaultNetworkCallback(
                 object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
                         appContainer.onConnectivityAvailable()
+                    }
+
+                    override fun onLost(network: Network) {
+                        appContainer.onConnectivityLost()
+                    }
+
+                    override fun onUnavailable() {
+                        appContainer.onConnectivityLost()
                     }
                 },
             )
@@ -96,7 +108,12 @@ class AppContainer(
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
     val listenerStatus = ListenerStatusRepository()
+
+    @Volatile
+    private var networkAvailable: Boolean = false
+
     private val database: NfaCollectorDatabase by lazy(databaseFactory)
+    private val diagnostics by lazy { DiagnosticRepository(RoomDiagnosticStore(database.diagnosticsDao())) }
     internal val bearerStore = AndroidKeystoreBearerStore(application.applicationContext)
     private val deliveryStore by lazy { RoomDeliveryStore(database) }
     private val ingestClient =
@@ -167,13 +184,45 @@ class AppContainer(
         activeListenerRef?.get()?.reconcileActiveNotifications()
     }
 
+    fun shadeCatchUpActive(): Boolean =
+        ShadeReconcilePace.degraded(listenerStatus.state.value.connected, networkAvailable)
+
+    fun setNetworkAvailable(available: Boolean) {
+        networkAvailable = available
+    }
+
+    fun noteListenerConnected() {
+        listenerStatus.onListenerConnected()
+        scope.launch(Dispatchers.IO) {
+            runCatching { diagnostics.record("LISTENER_CONNECTED", mapOf("listener" to "CONNECTED")) }
+        }
+    }
+
+    fun noteListenerDisconnected() {
+        listenerStatus.onListenerDisconnected()
+        scope.launch(Dispatchers.IO) {
+            runCatching { diagnostics.record("LISTENER_DISCONNECTED", mapOf("listener" to "DISCONNECTED")) }
+        }
+    }
+
     fun initializeOnIo() {
         scope.launch(Dispatchers.IO) {
+            restoreListenerTimestamps()
             sourceSelections.load()
             postedNotificationCallback.onSelectionLoadCompleted()
             runCatching { contractSync.maybeCheck(force = true) }
             recoverDeliveryOnStartup()
         }
+    }
+
+    private suspend fun restoreListenerTimestamps() {
+        val rows = runCatching { database.diagnosticsDao().recent(200) }.getOrDefault(emptyList())
+        listenerStatus.noteRestoredTimestamps(
+            lastConnectedAtEpochMillis =
+                rows.firstOrNull { it.eventCode == "LISTENER_CONNECTED" }?.createdAtEpochMillis,
+            lastDisconnectedAtEpochMillis =
+                rows.firstOrNull { it.eventCode == "LISTENER_DISCONNECTED" }?.createdAtEpochMillis,
+        )
     }
 
     suspend fun recoverDeliveryOnStartup() {
@@ -218,9 +267,17 @@ class AppContainer(
     }
 
     fun onConnectivityAvailable() {
+        val wasDown = !networkAvailable
+        networkAvailable = true
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
+        if (wasDown) requestConnectedShadeReconcile()
         scope.launch { runDeliveryDrain("connectivity-$now", maximumClaims = 32) }
+    }
+
+    fun onConnectivityLost() {
+        networkAvailable = false
+        requestConnectedShadeReconcile()
     }
 
     suspend fun runDeliveryDrain(
@@ -273,9 +330,25 @@ class AppContainer(
         database.diagnosticsDao().prune(diagnosticCutoff, document.config.diagnostics.maxRows)
     }
 
-    private fun startImmediateDeliveryAfterPersist(eventId: String) {
+    private fun startImmediateDeliveryAfterPersist(
+        eventId: String,
+        capturePath: String,
+        packageName: String,
+    ) {
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                diagnostics.record(
+                    "CAPTURE_PERSISTED",
+                    mapOf(
+                        "eventId" to eventId,
+                        "state" to capturePath,
+                        "packageName" to packageName,
+                    ),
+                )
+            }
+        }
         scope.launch { runDeliveryDrain("immediate-$eventId", maximumClaims = 1) }
     }
 

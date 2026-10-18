@@ -48,13 +48,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nfaalerts.collector.config.InstalledApp
+import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.ui.settings.EndpointProfileDraft
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import com.nfaalerts.collector.ui.sources.SourcePickerScreen
 import com.nfaalerts.collector.ui.theme.RgdsSemanticColors
 import com.nfaalerts.collector.ui.theme.RgdsTheme
 import com.nfaalerts.collector.ui.theme.RgdsThemeMode
-import com.nfaalerts.collector.data.DeliveryState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant

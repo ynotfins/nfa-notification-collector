@@ -110,7 +110,7 @@ class NotificationCaptureProcessorTest {
                     reader = NotificationContentReader { _, _ -> emptySnapshot() },
                     applicationMetadataResolver = ApplicationMetadataResolver { _, _ -> ApplicationMetadata(null, 42) },
                     persistence = CapturePersistence { _, _ -> order += "persisted" },
-                    onPersisted = { eventId -> order += "kick:$eventId" },
+                    onPersisted = { eventId, _, _ -> order += "kick:$eventId" },
                 )
 
             processor.process(request())

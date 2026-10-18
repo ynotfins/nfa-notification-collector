@@ -17,6 +17,7 @@ data class LightweightPostedNotification(
     val groupKey: String? = null,
     val overrideGroupKey: String? = null,
     val notificationHandle: Any,
+    val capturePath: String = CapturePath.LIVE,
 )
 
 data class NotificationIdentity(
@@ -39,6 +40,7 @@ data class DispatchedNotification(
     val identity: NotificationIdentity,
     val source: SourceSelection,
     val notificationHandle: Any,
+    val capturePath: String = CapturePath.LIVE,
 )
 
 fun interface CaptureDispatcher {
@@ -127,6 +129,7 @@ class PostedNotificationCallback(
                     ),
                 source = source,
                 notificationHandle = input.notificationHandle,
+                capturePath = input.capturePath,
             ),
         )
         return true

@@ -23,27 +23,37 @@ class NfaNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        appContainer().listenerStatus.onListenerConnected()
+        appContainer().noteListenerConnected()
         appContainer().registerActiveListener(this)
         CollectorReliabilityService.update(this)
         reconcileActiveNotifications()
-        periodicReconcileJob?.cancel()
-        periodicReconcileJob =
-            serviceScope.launch {
-                while (isActive) {
-                    delay(SHADE_RECONCILE_INTERVAL_MS)
-                    reconcileActiveNotifications()
-                }
-            }
+        startDegradedShadeLoop()
     }
 
     override fun onListenerDisconnected() {
         periodicReconcileJob?.cancel()
         periodicReconcileJob = null
         appContainer().unregisterActiveListener(this)
-        appContainer().listenerStatus.onListenerDisconnected()
+        appContainer().noteListenerDisconnected()
         requestCollectorListenerRebind(this)
         super.onListenerDisconnected()
+    }
+
+    private fun startDegradedShadeLoop() {
+        periodicReconcileJob?.cancel()
+        periodicReconcileJob =
+            serviceScope.launch {
+                while (isActive) {
+                    if (!appContainer().shadeCatchUpActive()) {
+                        delay(HEALTHY_PACE_POLL_MS)
+                        continue
+                    }
+                    delay(SHADE_RECONCILE_INTERVAL_MS)
+                    if (appContainer().shadeCatchUpActive()) {
+                        reconcileActiveNotifications()
+                    }
+                }
+            }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -61,7 +71,7 @@ class NfaNotificationListenerService : NotificationListenerService() {
             runCatching { activeNotifications?.toList().orEmpty() }
                 .getOrDefault(emptyList())
                 .filterNot(::isSystemAutogroupSummary)
-                .map(::toLightweight)
+                .map { toLightweight(it).copy(capturePath = CapturePath.SHADE) }
         serviceScope.launch {
             appContainer().reconcileActiveNotifications(active)
         }
@@ -103,6 +113,7 @@ class NfaNotificationListenerService : NotificationListenerService() {
 
     private companion object {
         const val UID_UNAVAILABLE = -1
-        const val SHADE_RECONCILE_INTERVAL_MS = 60_000L
+        const val HEALTHY_PACE_POLL_MS = 1_000L
+        const val SHADE_RECONCILE_INTERVAL_MS = ShadeReconcilePace.DEGRADED_INTERVAL_MS
     }
 }

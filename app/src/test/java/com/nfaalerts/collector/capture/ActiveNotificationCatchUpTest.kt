@@ -1,11 +1,11 @@
 package com.nfaalerts.collector.capture
 
 import android.app.Notification
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlinx.coroutines.runBlocking
 
 class ActiveNotificationCatchUpTest {
     @Test

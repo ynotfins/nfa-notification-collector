@@ -138,6 +138,8 @@ class DiagnosticRepository(
                 "DELIVERY_RETRY",
                 "DELIVERY_SENT",
                 "LISTENER_ACCEPTED",
+                "LISTENER_CONNECTED",
+                "LISTENER_DISCONNECTED",
                 "LISTENER_REJECTED",
                 "STALE_SENDING_RECOVERED",
             )

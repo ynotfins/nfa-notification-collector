@@ -65,6 +65,18 @@ class ListenerStatusRepository(
         mutableState.update { it.copy(connected = false, lastDisconnectedAtEpochMillis = clock()) }
     }
 
+    fun noteRestoredTimestamps(
+        lastConnectedAtEpochMillis: Long?,
+        lastDisconnectedAtEpochMillis: Long?,
+    ) {
+        mutableState.update { current ->
+            current.copy(
+                lastConnectedAtEpochMillis = current.lastConnectedAtEpochMillis ?: lastConnectedAtEpochMillis,
+                lastDisconnectedAtEpochMillis = current.lastDisconnectedAtEpochMillis ?: lastDisconnectedAtEpochMillis,
+            )
+        }
+    }
+
     override fun onCatchUpFinished(result: CatchUpResult) {
         mutableState.update {
             it.copy(
