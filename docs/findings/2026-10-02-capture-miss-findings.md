@@ -1,5 +1,7 @@
 # Capture miss findings — 2026-10-02
 
+**Historical snapshot.** The 60-second shade reconcile, the claim that Room has no `capturePath`, and the claim that durable listener diagnostics do not exist are not current. Current pace is in [../handoff/2026-10-18-shade-catch-up.md](../handoff/2026-10-18-shade-catch-up.md).
+
 **Branch:** `goal/capture-miss-hardening` (WIP treated as unverified; re-validated below)  
 **Stop:** Phase 2 only — no Phase 3+ code/grants until operator approval.  
 **Private data:** `docs/evidence/notif_dump.txt` is gitignored. This doc has **no** notification titles/text.

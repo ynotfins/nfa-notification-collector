@@ -18,7 +18,7 @@ Typical paths (confirm on device before soak claims):
 
 ## Notification History
 
-- Operator proof only. Compare counts manually as a **secondary** check.
+- Operator proof only. Compare counts manually as a **secondary** check. Do not scrape this screen. Shade catch-up is the degraded 3000 ms rule in [01-notification-listener.md](01-notification-listener.md), not a connected 60-second poll and not a history reader.
 - Primary soak oracle (Phase 5): `logcat -b events` notification_enqueue / notification_canceled (see findings doc). Never commit those logs.
 
 ## Competing listeners / modifiers

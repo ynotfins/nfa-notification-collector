@@ -13,6 +13,7 @@ From operator dumpsys (`docs/evidence/notif_dump.txt`, gitignored; content not c
 - App-level `isAllowPopup=false` → no heads-up popup even when importance is DEFAULT.
 - Burst posts can still be “quiet” under notification cooldown while remaining **active in the shade**.
 - Active shade children were still present for listeners; quiet ≠ undelivered to NLS.
+- Still-posted shade rows are catch-up only: every 3000 ms while the listener is connected and the network is down, plus one read when the listener reconnects or the network returns. A disconnected listener cannot read the shade until Android reconnects it. A connected listener with the network up does not poll the shade. See [01-notification-listener.md](01-notification-listener.md).
 
 ## Sensitive content
 

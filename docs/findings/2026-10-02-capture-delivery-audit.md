@@ -1,5 +1,7 @@
 # Capture → delivery audit — 2026-10-02
 
+**Historical snapshot.** Sentences below that say a 60-second shade reconcile while connected are not current. Current pace is in [../handoff/2026-10-18-shade-catch-up.md](../handoff/2026-10-18-shade-catch-up.md).
+
 **Companion:** [2026-10-02-capture-miss-findings.md](2026-10-02-capture-miss-findings.md)  
 **Docs pack:** [../reference/capture-reliability/MANIFEST.md](../reference/capture-reliability/MANIFEST.md)  
 **Scope:** Code + device evidence audit. **No product code changes in this phase.**

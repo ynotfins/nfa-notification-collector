@@ -10,6 +10,9 @@
 - The no-Ranking overload exists; this app currently uses it (gap called out in the audit).
 - After `onListenerDisconnected()`, only `requestRebind(ComponentName)` is safe; no further events until reconnect.
 - `getActiveNotifications()` is valid after `onListenerConnected()` and is the supported catch-up surface for **still-active** shade rows. Dismissed / History-only rows are not available here.
+- This app’s live path is immediate `onNotificationPosted`. When the network is down and the listener is still connected, shade catch-up reads `getActiveNotifications()` every 3000 ms (`ShadeReconcilePace.DEGRADED_INTERVAL_MS`). When the listener is disconnected, Android will not allow a shade read; the reliability service asks for a reconnect every 3000 ms, and the app reads the shade once as soon as the listener is back. The same one-time shade read runs when the network returns. While the listener is connected and the network is up, the app does not poll the shade. The periodic loop starts in `onListenerConnected` and is cancelled in `onListenerDisconnected`.
+- Saved rows record `captured_notifications.capturePath`: `LIVE`, `SHADE`, or `UNKNOWN` (`UNKNOWN` is the Room migration default for older rows). Durable listener diagnostics are `LISTENER_CONNECTED` and `LISTENER_DISCONNECTED`.
+- `delivery_outbox` drain is oldest-first: `ORDER BY captured_notifications.postTimeEpochMillis, rowid`.
 
 ## Type filters
 

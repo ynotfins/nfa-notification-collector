@@ -19,3 +19,5 @@
 | OkHttp | 5.3.0 | HTTPS ingest |
 
 No Flutter dependencies. Version facts for new pins must re-check Arabold first when the gateway is healthy; this pack used the repo lockfile as authority for “what we use,” not as a license to bump.
+
+Shade pace is not a library pin. Live capture stays immediate in `onNotificationPosted`. Shade catch-up is every 3000 ms while the listener is connected and the network is down, plus one read on listener reconnect and one read when the network returns. A disconnected listener cannot read the shade until Android reconnects it. See [01-notification-listener.md](01-notification-listener.md).

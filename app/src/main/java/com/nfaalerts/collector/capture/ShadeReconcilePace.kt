@@ -8,9 +8,10 @@ object CapturePath {
 
 /**
  * Live [android.service.notification.NotificationListenerService.onNotificationPosted]
- * stays immediate. Shade reads run only while the listener is disconnected or the
- * network is down, and then every few seconds so a still-posted alert is not left
- * for a minute.
+ * stays immediate. While the listener is connected and the network is down, shade
+ * reads run every few seconds. A disconnected listener cannot read the shade; the
+ * reliability service asks for a reconnect on that same interval, then one shade
+ * read runs on reconnect and when the network returns.
  */
 object ShadeReconcilePace {
     const val DEGRADED_INTERVAL_MS = 3_000L
