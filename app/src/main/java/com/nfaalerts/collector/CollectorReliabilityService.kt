@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -22,6 +23,8 @@ import com.nfaalerts.collector.capture.ShadeReconcilePace
 class CollectorReliabilityService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var stayAwake: CaptureStayAwake? = null
+    private var disconnectedTicks = 0
+    private var noticeShowsConnected: Boolean? = null
     private val watchdog =
         object : Runnable {
             override fun run() {
@@ -30,8 +33,16 @@ class CollectorReliabilityService : Service() {
                     return
                 }
                 val connected = listenerConnected()
-                if (!connected) {
-                    requestCollectorListenerRebind(this@CollectorReliabilityService)
+                refreshNoticeIfChanged(connected)
+                if (connected) {
+                    disconnectedTicks = 0
+                } else {
+                    disconnectedTicks += 1
+                    if (ListenerReconnectPolicy.shouldResetComponent(disconnectedTicks)) {
+                        resetCollectorListenerComponent(this@CollectorReliabilityService)
+                    } else {
+                        requestCollectorListenerRebind(this@CollectorReliabilityService)
+                    }
                 }
                 val delayMs =
                     if (connected) {
@@ -57,7 +68,9 @@ class CollectorReliabilityService : Service() {
                 setShowBadge(false)
             },
         )
-        startForeground(NOTIFICATION_ID, notification())
+        val connected = listenerConnected()
+        startForeground(NOTIFICATION_ID, notification(connected))
+        noticeShowsConnected = connected
         foregroundPosted = true
         stayAwake = runCatching { captureStayAwake(this) }.getOrNull()
         stayAwake?.holdForCapture()
@@ -96,7 +109,13 @@ class CollectorReliabilityService : Service() {
         return app.appContainer.listenerStatus.state.value.connected
     }
 
-    private fun notification(): Notification {
+    private fun refreshNoticeIfChanged(connected: Boolean) {
+        if (noticeShowsConnected == connected) return
+        noticeShowsConnected = connected
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(connected))
+    }
+
+    private fun notification(connected: Boolean): Notification {
         val contentIntent =
             PendingIntent.getActivity(
                 this,
@@ -104,12 +123,18 @@ class CollectorReliabilityService : Service() {
                 Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val statusText =
+            if (connected) {
+                "Notifications are persisted locally before ordered delivery."
+            } else {
+                "Listener disconnected. Asking Android to reconnect."
+            }
         val builder =
             Notification
                 .Builder(this, CHANNEL_ID)
                 .setSmallIcon(com.nfaalerts.collector.R.drawable.ic_collector)
                 .setContentTitle("NFA Collector is protecting capture")
-                .setContentText("Notifications are persisted locally before ordered delivery.")
+                .setContentText(statusText)
                 .setContentIntent(contentIntent)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .setOngoing(true)
@@ -180,6 +205,27 @@ internal fun captureStayAwake(context: Context): CaptureStayAwake {
             }
         },
     )
+}
+
+internal fun resetCollectorListenerComponent(context: Context) {
+    if (!hasNotificationAccess(context)) return
+    val component = ComponentName(context, NfaNotificationListenerService::class.java)
+    val packageManager = context.packageManager
+    runCatching {
+        packageManager.setComponentEnabledSetting(
+            component,
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+    }
+    runCatching {
+        packageManager.setComponentEnabledSetting(
+            component,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+    }
+    requestCollectorListenerRebind(context)
 }
 
 internal fun requestCollectorListenerRebind(context: Context) {
