@@ -39,6 +39,7 @@ class ManifestSecurityContractTest {
         assertEquals(1, permissionCount(main, "android.permission.FOREGROUND_SERVICE"))
         assertEquals(1, permissionCount(main, "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"))
         assertEquals(1, permissionCount(main, "android.permission.POST_NOTIFICATIONS"))
+        assertEquals(1, permissionCount(main, "android.permission.WAKE_LOCK"))
 
         val reliabilityService = namedElement(main, "service", ".CollectorReliabilityService")
         assertEquals("false", reliabilityService.getAttributeNS(ANDROID_NS, "exported"))

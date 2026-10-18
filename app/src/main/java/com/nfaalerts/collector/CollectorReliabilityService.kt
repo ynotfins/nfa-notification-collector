@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationAccessStatus
@@ -20,6 +21,7 @@ import com.nfaalerts.collector.capture.ShadeReconcilePace
 
 class CollectorReliabilityService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    private var stayAwake: CaptureStayAwake? = null
     private val watchdog =
         object : Runnable {
             override fun run() {
@@ -57,6 +59,8 @@ class CollectorReliabilityService : Service() {
         )
         startForeground(NOTIFICATION_ID, notification())
         foregroundPosted = true
+        stayAwake = runCatching { captureStayAwake(this) }.getOrNull()
+        stayAwake?.holdForCapture()
     }
 
     override fun onStartCommand(
@@ -79,6 +83,8 @@ class CollectorReliabilityService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(watchdog)
+        stayAwake?.release()
+        stayAwake = null
         foregroundPosted = false
         super.onDestroy()
     }
@@ -151,6 +157,29 @@ class CollectorRestartReceiver : BroadcastReceiver() {
         CaptureKeepAliveScheduler.ensure(context)
         (context.applicationContext as? NfaCollectorApp)?.appContainer?.onConnectivityAvailable()
     }
+}
+
+internal fun captureStayAwake(context: Context): CaptureStayAwake {
+    val powerManager = context.getSystemService(PowerManager::class.java)
+    val wakeLock =
+        powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "nfa-collector:capture",
+        )
+    wakeLock.setReferenceCounted(false)
+    return CaptureStayAwake(
+        object : StayAwakeLock {
+            override fun isHeld(): Boolean = wakeLock.isHeld
+
+            override fun acquire() {
+                wakeLock.acquire()
+            }
+
+            override fun release() {
+                wakeLock.release()
+            }
+        },
+    )
 }
 
 internal fun requestCollectorListenerRebind(context: Context) {
