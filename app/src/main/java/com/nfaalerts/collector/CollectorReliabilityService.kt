@@ -25,9 +25,14 @@ class CollectorReliabilityService : Service() {
                     stopSelf()
                     return
                 }
-                requestCollectorListenerRebind(this@CollectorReliabilityService)
+                val connected = listenerConnected()
+                if (!connected) {
+                    requestCollectorListenerRebind(this@CollectorReliabilityService)
+                }
                 (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
-                handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+                (application as NfaCollectorApp).appContainer.requestConnectedShadeReconcile()
+                val delayMs = if (connected) WATCHDOG_CONNECTED_INTERVAL_MS else WATCHDOG_DISCONNECTED_INTERVAL_MS
+                handler.postDelayed(this, delayMs)
             }
         }
 
@@ -58,10 +63,12 @@ class CollectorReliabilityService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        requestCollectorListenerRebind(this)
+        if (!listenerConnected()) {
+            requestCollectorListenerRebind(this)
+        }
         (application as NfaCollectorApp).appContainer.onConnectivityAvailable()
         handler.removeCallbacks(watchdog)
-        handler.postDelayed(watchdog, WATCHDOG_INTERVAL_MS)
+        handler.postDelayed(watchdog, WATCHDOG_DISCONNECTED_INTERVAL_MS)
         return START_STICKY
     }
 
@@ -71,6 +78,9 @@ class CollectorReliabilityService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun listenerConnected(): Boolean =
+        (application as? NfaCollectorApp)?.appContainer?.listenerStatus?.state?.value?.connected == true
 
     private fun notification(): Notification {
         val contentIntent =
@@ -96,7 +106,8 @@ class CollectorReliabilityService : Service() {
     companion object {
         private const val CHANNEL_ID = "collector-reliability"
         private const val NOTIFICATION_ID = 2701
-        private const val WATCHDOG_INTERVAL_MS = 5 * 60 * 1000L
+        private const val WATCHDOG_CONNECTED_INTERVAL_MS = 60_000L
+        private const val WATCHDOG_DISCONNECTED_INTERVAL_MS = 15_000L
 
         fun update(context: Context) {
             val intent = Intent(context, CollectorReliabilityService::class.java)
@@ -117,6 +128,7 @@ class CollectorRestartReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         requestCollectorListenerRebind(context)
         CollectorReliabilityService.update(context)
+        CaptureKeepAliveScheduler.ensure(context)
         (context.applicationContext as? NfaCollectorApp)?.appContainer?.onConnectivityAvailable()
     }
 }

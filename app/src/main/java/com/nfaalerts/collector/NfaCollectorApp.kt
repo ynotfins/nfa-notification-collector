@@ -9,6 +9,7 @@ import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
 import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
 import com.nfaalerts.collector.capture.LightweightPostedNotification
 import com.nfaalerts.collector.capture.ListenerStatusRepository
+import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
 import com.nfaalerts.collector.delivery.DrainPaceLimiter
@@ -44,6 +45,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
+import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -58,6 +60,9 @@ class NfaCollectorApp : Application() {
         super.onCreate()
         appContainer = AppContainer(this)
         appContainer.initializeOnIo()
+        requestCollectorListenerRebind(this)
+        CollectorReliabilityService.update(this)
+        CaptureKeepAliveScheduler.ensure(this)
         observeConnectivity()
     }
 
@@ -144,6 +149,23 @@ class AppContainer(
                 ),
             initializationDiagnostics = listenerStatus,
         )
+
+    @Volatile
+    private var activeListenerRef: WeakReference<NfaNotificationListenerService>? = null
+
+    fun registerActiveListener(listener: NfaNotificationListenerService) {
+        activeListenerRef = WeakReference(listener)
+    }
+
+    fun unregisterActiveListener(listener: NfaNotificationListenerService) {
+        if (activeListenerRef?.get() === listener) {
+            activeListenerRef = null
+        }
+    }
+
+    fun requestConnectedShadeReconcile() {
+        activeListenerRef?.get()?.reconcileActiveNotifications()
+    }
 
     fun initializeOnIo() {
         scope.launch(Dispatchers.IO) {

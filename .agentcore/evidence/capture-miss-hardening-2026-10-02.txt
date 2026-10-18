@@ -1,0 +1,22 @@
+# Capture miss hardening — device evidence 2026-10-02
+
+## Code
+- Branch: goal/capture-miss-hardening
+- APK SHA256: 2c7029ca6e3089e6e57585c0fdd35d4fcc3551792a43605ed4bfc74b189a7d23
+- Installed on R3GL605J0AH; NLS + CollectorReliabilityService bound
+
+## Device optimizations applied
+- deviceidle whitelist: collector, MacroDroid, BNN
+- am set-inactive false for those three
+- appops RUN_IN_BACKGROUND / RUN_ANY_IN_BACKGROUND allow
+- notification listeners reduced to: collector, MacroDroid, Samsung system (suggestions/notilus/launcher/smartmirroring)
+- Disallowed: Affiora, Pushbullet, OpenClaw, Microsoft Phone Link mirroring, AlertSheets
+
+## MacroDroid
+- Parallel only; history file nfa_alerts_24h.jsonl last entry ~2026-10-01 14:24 (same window as collector)
+- Keep NFA BNN Capture + Queue + NFA Queue Flush enabled; disable duplicate macros
+- Bearer must not live in Git; rotate if exported macros left the phone
+
+## Remaining operator taps (Samsung UI)
+- Device care → Battery → Background usage limits → Never sleeping apps: add NFA Collector, MacroDroid, BNN
+- Confirm MacroDroid group NFA has Capture+Queue ON and duplicates OFF

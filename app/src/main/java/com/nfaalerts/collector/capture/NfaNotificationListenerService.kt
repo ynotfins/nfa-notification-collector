@@ -11,31 +11,52 @@ import com.nfaalerts.collector.NfaCollectorApp
 import com.nfaalerts.collector.requestCollectorListenerRebind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class NfaNotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var periodicReconcileJob: Job? = null
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         appContainer().listenerStatus.onListenerConnected()
+        appContainer().registerActiveListener(this)
         CollectorReliabilityService.update(this)
         reconcileActiveNotifications()
+        periodicReconcileJob?.cancel()
+        periodicReconcileJob =
+            serviceScope.launch {
+                while (isActive) {
+                    delay(SHADE_RECONCILE_INTERVAL_MS)
+                    reconcileActiveNotifications()
+                }
+            }
     }
 
     override fun onListenerDisconnected() {
+        periodicReconcileJob?.cancel()
+        periodicReconcileJob = null
+        appContainer().unregisterActiveListener(this)
         appContainer().listenerStatus.onListenerDisconnected()
         requestCollectorListenerRebind(this)
         super.onListenerDisconnected()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (isSystemAutogroupSummary(sbn)) return
-        appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn))
+        try {
+            if (isSystemAutogroupSummary(sbn)) return
+            // Clone before leaving the binder thread so async persist cannot lose extras.
+            appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn))
+        } catch (_: Throwable) {
+            appContainer().listenerStatus.onPostedCallbackFailure()
+        }
     }
 
-    private fun reconcileActiveNotifications() {
+    internal fun reconcileActiveNotifications() {
         val active =
             runCatching { activeNotifications?.toList().orEmpty() }
                 .getOrDefault(emptyList())
@@ -46,8 +67,11 @@ class NfaNotificationListenerService : NotificationListenerService() {
         }
     }
 
-    private fun toLightweight(sbn: StatusBarNotification): LightweightPostedNotification =
-        LightweightPostedNotification(
+    private fun toLightweight(sbn: StatusBarNotification): LightweightPostedNotification {
+        val clonedNotification =
+            runCatching { sbn.notification.clone() as Notification }
+                .getOrElse { sbn.notification }
+        return LightweightPostedNotification(
             packageName = sbn.packageName,
             key = sbn.key,
             notificationId = sbn.id,
@@ -64,8 +88,9 @@ class NfaNotificationListenerService : NotificationListenerService() {
             isClearable = sbn.isClearable,
             groupKey = sbn.groupKey,
             overrideGroupKey = sbn.overrideGroupKey,
-            notificationHandle = sbn.notification,
+            notificationHandle = clonedNotification,
         )
+    }
 
     private fun isSystemAutogroupSummary(sbn: StatusBarNotification): Boolean =
         isSystemAutogroupSummary(
@@ -78,5 +103,6 @@ class NfaNotificationListenerService : NotificationListenerService() {
 
     private companion object {
         const val UID_UNAVAILABLE = -1
+        const val SHADE_RECONCILE_INTERVAL_MS = 60_000L
     }
 }

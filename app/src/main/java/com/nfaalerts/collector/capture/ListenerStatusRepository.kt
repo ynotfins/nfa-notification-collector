@@ -18,6 +18,7 @@ data class ListenerStatus(
     val dispatchRejectedCount: Long = 0,
     val workerFailureCount: Long = 0,
     val lastWorkerFailureType: String? = null,
+    val postedCallbackFailureCount: Long = 0,
     val activeWorkers: Int = 0,
     val maximumObservedBacklog: Int = 0,
     val initializationBufferedCount: Long = 0,
@@ -101,6 +102,10 @@ class ListenerStatusRepository(
                 lastWorkerFailureType = failureType,
             )
         }
+    }
+
+    fun onPostedCallbackFailure() {
+        mutableState.update { it.copy(postedCallbackFailureCount = it.postedCallbackFailureCount + 1) }
     }
 
     override fun onInitializationBuffered(depth: Int) {

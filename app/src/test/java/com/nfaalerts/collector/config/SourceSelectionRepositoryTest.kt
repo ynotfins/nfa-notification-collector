@@ -2,7 +2,10 @@ package com.nfaalerts.collector.config
 
 import android.content.pm.ApplicationInfo
 import com.nfaalerts.collector.capture.RawTextField
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -140,6 +143,46 @@ class SourceSelectionRepositoryTest {
 
             assertTrue(repository.snapshot().selections.isEmpty())
             assertEquals(SelectionLoadState.Invalid("TOO_MANY_SOURCES"), repository.loadState.value)
+        }
+
+    @Test
+    fun `reload keeps last-good allowlist when persisted config becomes invalid`() =
+        runBlocking {
+            val store = RecordingSelectionStore()
+            val repository = SourceSelectionRepository(store)
+            assertEquals(SelectionUpdate.Accepted, repository.upsert(selection("com.example.keep")))
+            assertEquals(setOf("com.example.keep"), repository.snapshot().packageNames)
+
+            store.lastSaved = (0..MAX_SELECTED_SOURCES).map { selection("com.example.invalid$it") }
+            repository.load()
+
+            assertEquals(setOf("com.example.keep"), repository.snapshot().packageNames)
+            assertEquals(SelectionLoadState.Invalid("TOO_MANY_SOURCES"), repository.loadState.value)
+        }
+
+    @Test
+    fun `reload does not publish empty allowlist before store load completes`() =
+        runBlocking {
+            val gate = CompletableDeferred<Unit>()
+            val store =
+                object : SourceSelectionStore {
+                    override suspend fun load(): List<SourceSelection> {
+                        gate.await()
+                        return listOf(selection("com.example.reloaded"))
+                    }
+
+                    override suspend fun save(selections: List<SourceSelection>) = Unit
+                }
+            val repository = SourceSelectionRepository(store)
+            assertEquals(SelectionUpdate.Accepted, repository.upsert(selection("com.example.keep")))
+
+            val loadJob = launch { repository.load() }
+            yield()
+            assertEquals(setOf("com.example.keep"), repository.snapshot().packageNames)
+            gate.complete(Unit)
+            loadJob.join()
+            assertEquals(setOf("com.example.reloaded"), repository.snapshot().packageNames)
+            assertEquals(SelectionLoadState.Ready, repository.loadState.value)
         }
 
     @Test
