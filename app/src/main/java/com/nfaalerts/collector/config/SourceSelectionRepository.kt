@@ -59,7 +59,8 @@ class SourceSelectionRepository(
 
     suspend fun load() =
         mutationMutex.withLock {
-            publish(AllowlistSnapshot.EMPTY)
+            // Keep the last-good allowlist published while reloading. Clearing to EMPTY here
+            // dropped live BNN posts during config import / restart races.
             mutableLoadState.value = SelectionLoadState.Loading
             try {
                 val loaded = store.load()
@@ -67,10 +68,14 @@ class SourceSelectionRepository(
                 publish(AllowlistSnapshot.from(loaded))
                 mutableLoadState.value = SelectionLoadState.Ready
             } catch (failure: InvalidSelectionConfigException) {
-                publish(AllowlistSnapshot.EMPTY)
+                if (current.get().selections.isEmpty()) {
+                    publish(AllowlistSnapshot.EMPTY)
+                }
                 mutableLoadState.value = SelectionLoadState.Invalid(failure.code)
             } catch (_: Exception) {
-                publish(AllowlistSnapshot.EMPTY)
+                if (current.get().selections.isEmpty()) {
+                    publish(AllowlistSnapshot.EMPTY)
+                }
                 mutableLoadState.value = SelectionLoadState.Invalid("INVALID_CONFIG")
             }
         }

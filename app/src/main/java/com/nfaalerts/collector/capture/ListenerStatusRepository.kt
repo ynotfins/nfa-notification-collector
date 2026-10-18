@@ -18,6 +18,7 @@ data class ListenerStatus(
     val dispatchRejectedCount: Long = 0,
     val workerFailureCount: Long = 0,
     val lastWorkerFailureType: String? = null,
+    val postedCallbackFailureCount: Long = 0,
     val activeWorkers: Int = 0,
     val maximumObservedBacklog: Int = 0,
     val initializationBufferedCount: Long = 0,
@@ -64,6 +65,18 @@ class ListenerStatusRepository(
         mutableState.update { it.copy(connected = false, lastDisconnectedAtEpochMillis = clock()) }
     }
 
+    fun noteRestoredTimestamps(
+        lastConnectedAtEpochMillis: Long?,
+        lastDisconnectedAtEpochMillis: Long?,
+    ) {
+        mutableState.update { current ->
+            current.copy(
+                lastConnectedAtEpochMillis = current.lastConnectedAtEpochMillis ?: lastConnectedAtEpochMillis,
+                lastDisconnectedAtEpochMillis = current.lastDisconnectedAtEpochMillis ?: lastDisconnectedAtEpochMillis,
+            )
+        }
+    }
+
     override fun onCatchUpFinished(result: CatchUpResult) {
         mutableState.update {
             it.copy(
@@ -101,6 +114,10 @@ class ListenerStatusRepository(
                 lastWorkerFailureType = failureType,
             )
         }
+    }
+
+    fun onPostedCallbackFailure() {
+        mutableState.update { it.copy(postedCallbackFailureCount = it.postedCallbackFailureCount + 1) }
     }
 
     override fun onInitializationBuffered(depth: Int) {

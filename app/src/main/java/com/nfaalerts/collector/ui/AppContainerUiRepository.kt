@@ -284,10 +284,14 @@ class AppContainerUiRepository internal constructor(
                             it.state == DeliveryState.QUARANTINED && !it.quarantinePreview.isNullOrBlank() -> {
                                 "Rejected text preview: ${it.quarantinePreview}"
                             }
+
                             it.state == DeliveryState.QUARANTINED -> {
                                 "Needs fix — open preview for rejected raw text (row kept forever until operator policy)"
                             }
-                            else -> "Notification content redacted"
+
+                            else -> {
+                                "Notification content redacted"
+                            }
                         },
                 )
             }

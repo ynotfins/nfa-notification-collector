@@ -49,7 +49,11 @@ class NotificationCaptureProcessor(
     private val applicationMetadataResolver: ApplicationMetadataResolver,
     private val persistence: CapturePersistence,
     private val serializer: SafeCanonicalSerializer = SafeCanonicalSerializer(),
-    private val onPersisted: suspend (String) -> Unit = {},
+    private val onPersisted: suspend (
+        eventId: String,
+        capturePath: String,
+        packageName: String,
+    ) -> Unit = { _, _, _ -> },
     private val contractVersionProvider: () -> String = { "unknown" },
 ) {
     suspend fun process(request: DispatchedNotification) {
@@ -70,7 +74,7 @@ class NotificationCaptureProcessor(
             persistence.persist(fallback.first, fallback.second)
         }
         try {
-            onPersisted(request.eventId)
+            onPersisted(request.eventId, request.capturePath, request.identity.packageName)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -172,6 +176,7 @@ class NotificationCaptureProcessor(
                 envelopeJson = envelopeJson,
                 envelopeSha256 = sha256(envelopeJson),
                 envelopeUtf8Bytes = envelopeJson.toByteArray(StandardCharsets.UTF_8).size,
+                capturePath = request.capturePath,
             )
         return capture to
             DeliveryOutboxEntity(
@@ -259,7 +264,7 @@ class NotificationCaptureProcessor(
         fun createAndroid(
             packageManager: PackageManager,
             captureWriteDao: () -> com.nfaalerts.collector.data.CaptureWriteDao,
-            onPersisted: suspend (String) -> Unit = {},
+            onPersisted: suspend (String, String, String) -> Unit = { _, _, _ -> },
             contractVersionProvider: () -> String = { "unknown" },
         ) = NotificationCaptureProcessor(
             reader =

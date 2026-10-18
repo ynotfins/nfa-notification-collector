@@ -4,6 +4,7 @@ import androidx.room3.Entity
 import androidx.room3.ForeignKey
 import androidx.room3.Index
 import androidx.room3.PrimaryKey
+import com.nfaalerts.collector.capture.CapturePath
 
 @Entity(tableName = "captured_notifications")
 data class CapturedNotificationEntity(
@@ -20,6 +21,7 @@ data class CapturedNotificationEntity(
     val envelopeJson: String,
     val envelopeSha256: String,
     val envelopeUtf8Bytes: Int,
+    val capturePath: String = CapturePath.UNKNOWN,
 )
 
 @Entity(

@@ -94,6 +94,28 @@ class DeliveryDatabaseInstrumentedTest {
         }
 
     @Test
+    fun migrationThreeToFourPreservesCapturesAndMarksOldRowsUnknown() =
+        runBlocking {
+            migrationHelper.createDatabase(3).use { connection ->
+                connection.execSQL(
+                    """
+                    INSERT INTO captured_notifications
+                    VALUES ('keep','us.bnn.newsapp','bnn','key',1,NULL,10,20,'raw','{}','{}','sha',2)
+                    """.trimIndent(),
+                )
+            }
+
+            migrationHelper.runMigrationsAndValidate(4, listOf(NfaCollectorDatabase.MIGRATION_3_4)).use { connection ->
+                connection
+                    .prepare("SELECT capturePath FROM captured_notifications WHERE eventId='keep'")
+                    .use { statement ->
+                        assertTrue(statement.step())
+                        assertEquals("UNKNOWN", statement.getText(0))
+                    }
+            }
+        }
+
+    @Test
     fun claimDueIsAtomicAndDatabaseTimeIsAuthoritative() =
         runBlocking {
             database = inMemoryDatabase()
@@ -146,6 +168,19 @@ class DeliveryDatabaseInstrumentedTest {
             assertEquals(
                 "z-oldest",
                 database!!.deliveryDao().claimDue("manual", 1_000L, 601_000L)?.eventId,
+            )
+        }
+
+    @Test
+    fun claimDueSendsOldestNotificationPostTimeFirstEvenWhenInsertedNewestFirst() =
+        runBlocking {
+            database = inMemoryDatabase()
+            insert("newer-inserted-first", DeliveryState.PENDING, postTime = 7_000L)
+            insert("older-inserted-second", DeliveryState.PENDING, postTime = 1_000L)
+
+            assertEquals(
+                "older-inserted-second",
+                database!!.deliveryDao().claimDue("worker", 10_000L, 610_000L)?.eventId,
             )
         }
 
@@ -370,11 +405,12 @@ class DeliveryDatabaseInstrumentedTest {
         updatedAt: Long = 0L,
         sentAt: Long? = null,
         capturedAt: Long = 0L,
+        postTime: Long = 0L,
         serverReceivedAt: String? = null,
         lastErrorCode: String? = null,
     ) {
         database!!.captureWriteDao().insertCapture(
-            capture(eventId, capturedAt),
+            capture(eventId, capturedAt, postTime),
             DeliveryOutboxEntity(
                 eventId = eventId,
                 state = state,
@@ -391,6 +427,7 @@ class DeliveryDatabaseInstrumentedTest {
     private fun capture(
         eventId: String,
         capturedAt: Long = 0L,
+        postTime: Long = 0L,
     ) = CapturedNotificationEntity(
         eventId = eventId,
         packageName = "com.example.bnn",
@@ -398,7 +435,7 @@ class DeliveryDatabaseInstrumentedTest {
         notificationKey = "key-$eventId",
         notificationId = 1,
         notificationTag = null,
-        postTimeEpochMillis = 0L,
+        postTimeEpochMillis = postTime,
         capturedAtEpochMillis = capturedAt,
         rawText = "raw-$eventId",
         rawCandidatesJson = "{}",

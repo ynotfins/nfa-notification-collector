@@ -29,3 +29,10 @@ reports/
 # Windows folder metadata
 desktop.ini
 Thumbs.db
+
+# Private device dumps / soak oracles (may contain notification content)
+docs/evidence/notif_dump.txt
+docs/evidence/*.events.log
+docs/evidence/*-oracle*
+docs/evidence/room-export*
+docs/evidence/logcat*

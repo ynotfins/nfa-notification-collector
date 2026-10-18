@@ -11,43 +11,77 @@ import com.nfaalerts.collector.NfaCollectorApp
 import com.nfaalerts.collector.requestCollectorListenerRebind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class NfaNotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var periodicReconcileJob: Job? = null
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        appContainer().listenerStatus.onListenerConnected()
+        appContainer().noteListenerConnected()
+        appContainer().registerActiveListener(this)
         CollectorReliabilityService.update(this)
         reconcileActiveNotifications()
+        startDegradedShadeLoop()
     }
 
     override fun onListenerDisconnected() {
-        appContainer().listenerStatus.onListenerDisconnected()
+        periodicReconcileJob?.cancel()
+        periodicReconcileJob = null
+        appContainer().unregisterActiveListener(this)
+        appContainer().noteListenerDisconnected()
         requestCollectorListenerRebind(this)
         super.onListenerDisconnected()
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (isSystemAutogroupSummary(sbn)) return
-        appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn))
+    private fun startDegradedShadeLoop() {
+        periodicReconcileJob?.cancel()
+        periodicReconcileJob =
+            serviceScope.launch {
+                while (isActive) {
+                    if (!appContainer().shadeCatchUpActive()) {
+                        delay(HEALTHY_PACE_POLL_MS)
+                        continue
+                    }
+                    delay(SHADE_RECONCILE_INTERVAL_MS)
+                    if (appContainer().shadeCatchUpActive()) {
+                        reconcileActiveNotifications()
+                    }
+                }
+            }
     }
 
-    private fun reconcileActiveNotifications() {
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        try {
+            if (isSystemAutogroupSummary(sbn)) return
+            // Clone before leaving the binder thread so async persist cannot lose extras.
+            appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn))
+        } catch (_: Throwable) {
+            appContainer().listenerStatus.onPostedCallbackFailure()
+        }
+    }
+
+    internal fun reconcileActiveNotifications() {
         val active =
             runCatching { activeNotifications?.toList().orEmpty() }
                 .getOrDefault(emptyList())
                 .filterNot(::isSystemAutogroupSummary)
-                .map(::toLightweight)
+                .map { toLightweight(it).copy(capturePath = CapturePath.SHADE) }
         serviceScope.launch {
             appContainer().reconcileActiveNotifications(active)
         }
     }
 
-    private fun toLightweight(sbn: StatusBarNotification): LightweightPostedNotification =
-        LightweightPostedNotification(
+    private fun toLightweight(sbn: StatusBarNotification): LightweightPostedNotification {
+        val clonedNotification =
+            runCatching { sbn.notification.clone() as Notification }
+                .getOrElse { sbn.notification }
+        return LightweightPostedNotification(
             packageName = sbn.packageName,
             key = sbn.key,
             notificationId = sbn.id,
@@ -64,8 +98,9 @@ class NfaNotificationListenerService : NotificationListenerService() {
             isClearable = sbn.isClearable,
             groupKey = sbn.groupKey,
             overrideGroupKey = sbn.overrideGroupKey,
-            notificationHandle = sbn.notification,
+            notificationHandle = clonedNotification,
         )
+    }
 
     private fun isSystemAutogroupSummary(sbn: StatusBarNotification): Boolean =
         isSystemAutogroupSummary(
@@ -78,5 +113,7 @@ class NfaNotificationListenerService : NotificationListenerService() {
 
     private companion object {
         const val UID_UNAVAILABLE = -1
+        const val HEALTHY_PACE_POLL_MS = 1_000L
+        const val SHADE_RECONCILE_INTERVAL_MS = ShadeReconcilePace.DEGRADED_INTERVAL_MS
     }
 }
