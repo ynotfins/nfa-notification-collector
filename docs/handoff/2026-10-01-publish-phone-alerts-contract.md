@@ -1,23 +1,12 @@
 # Handoff — publish phone-alerts.contract.json
 
-**To:** nfa-platform agent / ingest authority maintainer  
-**From:** nfa-notification-collector  
-**Date:** 2026-10-01  
+**Status:** DONE on nfa-platform `integration/commercial-readiness` (PR #78, tip includes `0425f06`).
 
-## Ask
+**Published paths:**
 
-Please publish a machine-readable phone ingest contract at:
+- `D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json` (`version` 1.2.0)
+- `D:\github\nfa-platform\contracts\ingest\phone-alerts.request.schema.json`
 
-`D:\github\nfa-platform\contracts\ingest\phone-alerts.contract.json`
+**Collector mirror:** `docs/contracts/phone-alerts.contract.snapshot.json` + bundled `PhoneAlertsContractCatalog` (`contractVersion` `1.2.0`).
 
-Use the snapshot shape already mirrored in this repo:
-
-`docs/contracts/phone-alerts.contract.snapshot.json`
-
-## Why
-
-The collector performs a daily contract sync so phone projection/rate/quarantine rules stay aligned with the live gateway without inventing a second format. Until the published file exists, the collector uses the bundled snapshot derived from `DATABASE.md` §10 and `scripts/ingest-gateway.ts`.
-
-## Do not change from the collector repo
-
-This repository will not edit nfa-platform. Authority remains DATABASE.md + ingest-gateway.ts.
+**Still planned:** authenticated phone HTTP route to serve the contract (poll policy notes in the published JSON). Until then, APK/bundled snapshot + agent redeploy is the phone refresh path.

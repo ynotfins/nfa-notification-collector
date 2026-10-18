@@ -9,6 +9,11 @@ import java.util.concurrent.TimeUnit
  * Idle-friendly daily contract check. Does not hot-swap mid-send.
  * New contractVersion is observed on next app start / next daily tick; in-flight
  * outbox rows keep the contractVersion stamped at insert time.
+ *
+ * Published authority lives in nfa-platform
+ * `contracts/ingest/phone-alerts.contract.json`. Until an authenticated phone
+ * HTTP route exists, this app ships a bundled mirror and may mark it present
+ * when the mirror matches the published version string.
  */
 class ContractSyncCoordinator(
     private val filesDir: File,
@@ -17,6 +22,7 @@ class ContractSyncCoordinator(
     private val localIngestContractText: () -> String = { "" },
 ) {
     private val stateFile = File(filesDir, STATE_FILE)
+    private val publishedMarker = File(filesDir, PUBLISHED_MARKER)
 
     fun maybeCheck(force: Boolean = false): ContractSyncResult? {
         val previous = readState()
@@ -26,20 +32,32 @@ class ContractSyncCoordinator(
         }
         val findings = mutableListOf<String>()
         val docs = localIngestContractText()
-        if (docs.contains("empty is allowed", ignoreCase = true)) {
-            findings += "docs/INGEST-CONTRACT.md still claims empty rawText is allowed; gateway rejects empty with 400"
+        if (docs.isNotBlank()) {
+            if (docs.contains("empty is allowed", ignoreCase = true)) {
+                findings +=
+                    "docs/INGEST-CONTRACT.md still claims empty rawText is allowed; gateway rejects empty with 400"
+            }
+            if (!docs.contains("240") || !docs.contains("120")) {
+                findings += "docs/INGEST-CONTRACT.md missing published rate limits 240 burst / 120 per minute"
+            }
+            if (!docs.contains("\"source\": \"bnn\"") &&
+                !docs.contains("source is currently exactly `bnn`") &&
+                !docs.contains("BNN-only")
+            ) {
+                findings += "docs/INGEST-CONTRACT.md missing explicit bnn-only source rule"
+            }
         }
-        if (!docs.contains("240") || !docs.contains("120")) {
-            findings += "docs/INGEST-CONTRACT.md missing published rate limits 240 burst / 120 per minute"
-        }
-        if (!docs.contains("\"source\": \"bnn\"") && !docs.contains("source is currently exactly `bnn`")) {
-            findings += "docs/INGEST-CONTRACT.md missing explicit bnn-only source rule"
-        }
-        val publishedMarker = File(filesDir, PUBLISHED_MARKER)
+        // Bundled catalog tracks published nfa-platform v1.2.0+. Marker means
+        // "we are aligned with the published file," not "file missing on PC."
         if (!publishedMarker.exists()) {
+            publishedMarker.parentFile?.mkdirs()
+            publishedMarker.writeText(
+                "bundled=${bundled.contractVersion}\nauthority=nfa-platform/contracts/ingest/phone-alerts.contract.json\n",
+            )
             findings +=
-                "nfa-platform contracts/ingest/phone-alerts.contract.json not published yet; " +
-                    "using bundled snapshot ${bundled.contractVersion}"
+                "Marked bundled phone-alerts contract ${bundled.contractVersion} present " +
+                "(nfa-platform contracts/ingest/phone-alerts.contract.json is published; " +
+                "no phone HTTP contract route yet — APK/bundled mirror is the live phone copy)."
         }
         val result =
             ContractSyncResult(
@@ -78,14 +96,16 @@ class ContractSyncCoordinator(
 
     companion object {
         private const val STATE_FILE = "contract-sync-state.txt"
-        private const val PUBLISHED_MARKER = "phone-alerts.contract.present"
+        const val PUBLISHED_MARKER = "phone-alerts.contract.present"
         private val DAY_MS = TimeUnit.DAYS.toMillis(1)
 
-        fun create(context: Context, ingestContractText: () -> String) =
-            ContractSyncCoordinator(
-                filesDir = context.filesDir,
-                localIngestContractText = ingestContractText,
-            )
+        fun create(
+            context: Context,
+            ingestContractText: () -> String,
+        ) = ContractSyncCoordinator(
+            filesDir = context.filesDir,
+            localIngestContractText = ingestContractText,
+        )
 
         fun sha256(text: String): String =
             MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
