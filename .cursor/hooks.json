@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "type": "prompt",
+        "matcher": {
+          "toolType": "Write"
+        },
+        "command": ".cursor/hooks/truthkeeper_watch.sh",
+        "failClosed": false,
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "type": "prompt",
+        "command": ".cursor/hooks/truthkeeper_stop.sh",
+        "failClosed": false,
+        "timeout": 10
+      }
+    ]
+  }
+}
