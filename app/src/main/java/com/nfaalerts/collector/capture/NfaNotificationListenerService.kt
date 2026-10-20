@@ -57,30 +57,89 @@ class NfaNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        try {
-            if (isSystemAutogroupSummary(sbn)) return
-            // Clone before leaving the binder thread so async persist cannot lose extras.
-            appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn))
-        } catch (_: Throwable) {
-            appContainer().listenerStatus.onPostedCallbackFailure()
-        }
+        handlePosted(sbn, ranking = null)
+    }
+
+    override fun onNotificationPosted(
+        sbn: StatusBarNotification,
+        rankingMap: RankingMap,
+    ) {
+        handlePosted(sbn, readRanking(sbn.key, rankingMap))
     }
 
     internal fun reconcileActiveNotifications() {
+        val rankingMap = runCatching { currentRanking }.getOrNull()
         val active =
             runCatching { activeNotifications?.toList().orEmpty() }
                 .getOrDefault(emptyList())
                 .filterNot(::isSystemAutogroupSummary)
-                .map { toLightweight(it).copy(capturePath = CapturePath.SHADE) }
+                .map { sbn ->
+                    toLightweight(sbn, rankingMap?.let { readRanking(sbn.key, it) })
+                        .copy(capturePath = CapturePath.SHADE)
+                }
         serviceScope.launch {
             appContainer().reconcileActiveNotifications(active)
         }
     }
 
-    private fun toLightweight(sbn: StatusBarNotification): LightweightPostedNotification {
-        val clonedNotification =
-            runCatching { sbn.notification.clone() as Notification }
-                .getOrElse { sbn.notification }
+    private fun handlePosted(
+        sbn: StatusBarNotification,
+        ranking: RankingSnapshot?,
+    ) {
+        try {
+            appContainer().awaitSelectionsReady()
+            if (isSystemAutogroupSummary(sbn)) {
+                appContainer().noteCaptureDrop(
+                    CaptureDropReason.AUTOGROUP_SUMMARY,
+                    sbn.packageName,
+                    CapturePath.LIVE,
+                )
+                return
+            }
+            appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn, ranking))
+        } catch (_: Throwable) {
+            appContainer().listenerStatus.onPostedCallbackFailure()
+        }
+    }
+
+    private fun readRanking(
+        key: String,
+        rankingMap: RankingMap,
+    ): RankingSnapshot? {
+        val ranking = Ranking()
+        if (!rankingMap.getRanking(key, ranking)) return null
+        val channel = runCatching { ranking.channel }.getOrNull()
+        return RankingSnapshot(
+            importance = ranking.importance,
+            suppressedVisualEffects = ranking.suppressedVisualEffects,
+            matchesInterruptionFilter = ranking.matchesInterruptionFilter(),
+            ambient = ranking.isAmbient,
+            lastAudibleAlertAtEpochMillis = ranking.lastAudiblyAlertedMillis,
+            channelId = channel?.id,
+            lockscreenVisibilityOverride = ranking.lockscreenVisibilityOverride,
+            channelLockscreenVisibility = channel?.lockscreenVisibility,
+            suspended = ranking.isSuspended,
+        )
+    }
+
+    private fun toLightweight(
+        sbn: StatusBarNotification,
+        ranking: RankingSnapshot?,
+    ): LightweightPostedNotification {
+        val cloneOutcome = runCatching { sbn.notification.clone() }
+        val notification =
+            notificationAfterCopy(
+                cloneSucceeded = cloneOutcome.isSuccess,
+                cloned = cloneOutcome.getOrNull(),
+                original = sbn.notification,
+                onCloneFailure = {
+                    appContainer().noteCaptureDrop(
+                        CaptureDropReason.COPY_CLONE_FAILURE,
+                        sbn.packageName,
+                        CapturePath.LIVE,
+                    )
+                },
+            )
         return LightweightPostedNotification(
             packageName = sbn.packageName,
             key = sbn.key,
@@ -98,16 +157,17 @@ class NfaNotificationListenerService : NotificationListenerService() {
             isClearable = sbn.isClearable,
             groupKey = sbn.groupKey,
             overrideGroupKey = sbn.overrideGroupKey,
-            notificationHandle = clonedNotification,
+            notificationHandle = notification,
+            ranking = ranking,
         )
     }
 
     private fun isSystemAutogroupSummary(sbn: StatusBarNotification): Boolean =
-        isSystemAutogroupSummary(
+        autogroupAdmission(
             sbn.notification.flags,
             Notification.FLAG_GROUP_SUMMARY,
             Notification.FLAG_LOCAL_ONLY,
-        )
+        ) != null
 
     private fun appContainer() = (application as NfaCollectorApp).appContainer
 

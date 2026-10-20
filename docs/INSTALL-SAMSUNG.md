@@ -28,6 +28,38 @@ Record authorization, model, product, Android release/API, security patch and in
 
 Never pass the ingest bearer in ADB commands, intents, shell history or logcat filters.
 
+## PC scripts (no root)
+
+From this repo, with the phone connected:
+
+```powershell
+pwsh -File scripts/device/apply-reliability-grants.ps1
+pwsh -File scripts/device/verify-reliability-grants.ps1
+```
+
+The apply script whitelists device idle, marks the app active, and allows background app-ops for the collector, BNN, and MacroDroid. It does not turn other listeners off and it never carries the ingest bearer. The verify script prints whitelist, standby, app-ops, and whether Notification Access lists the collector.
+
+Samsung Never sleeping apps is still a phone Settings step. The scripts cannot set it.
+
+## Soak oracle (manual, gitignored output)
+
+Notification History stays a manual second check. These scripts only compare the phone's notification event log with saved package, key or tag, and post time. They do not print notification text.
+
+```powershell
+pwsh -File scripts/device/capture-notification-events.ps1 -DurationSeconds 900
+pwsh -File scripts/device/export-room-identities.ps1
+pwsh -File scripts/device/compare-notification-oracle.ps1
+```
+
+Output stays in `docs/evidence/soak-oracle/`, which is gitignored. A locked-screen run is still required before anyone claims the app never misses.
+
+## What a non-root app cannot get
+
+- Reading Settings → Notification history
+- Unredacted sensitive notifications that Android only gives to system apps
+- A guaranteed callback for every History row (the October 1 shared miss)
+- Direct control of Samsung Never sleeping / Deep sleeping lists (Settings only)
+
 ## Operator setup after installation
 
 1. Open NFA Notification Collector.

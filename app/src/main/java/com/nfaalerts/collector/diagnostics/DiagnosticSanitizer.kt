@@ -142,6 +142,7 @@ class DiagnosticRepository(
                 "LISTENER_DISCONNECTED",
                 "LISTENER_REJECTED",
                 "STALE_SENDING_RECOVERED",
+                "CAPTURE_DROPPED",
             )
         private val ALLOWED_FIELDS =
             setOf(

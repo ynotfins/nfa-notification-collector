@@ -114,6 +114,13 @@ data class CollectorUiSnapshot(
     val canonicalConfigRevision: String = "",
     val bearerSavedAtEpochMillis: Long? = null,
     val bearerRevisionOk: Boolean = false,
+    val captureBufferDepth: Int = 0,
+    val captureWorkers: Int = 0,
+    val allowlistRejectCount: Long = 0,
+    val autogroupSkipCount: Long = 0,
+    val copyCloneFailureCount: Long = 0,
+    val bufferOverflowCount: Long = 0,
+    val catchUpSkipCount: Long = 0,
     internal val liveVerificationFingerprint: LiveVerificationFingerprint? = null,
 ) {
     val operationallyHealthy: Boolean

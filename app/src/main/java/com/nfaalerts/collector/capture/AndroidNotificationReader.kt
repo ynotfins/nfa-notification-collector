@@ -12,6 +12,8 @@ import androidx.annotation.RequiresApi
 data class AndroidNotificationSnapshot(
     val envelopeValues: Map<String, Any?>,
     val rawTextSelection: RawTextSelection,
+    val visibility: Int? = null,
+    val visibleTextBlank: Boolean = false,
 )
 
 object AndroidNotificationReader {
@@ -28,7 +30,11 @@ object AndroidNotificationReader {
                 RawTextField.TICKER to listOfNotNull(notification.tickerText?.toString()),
             )
         val rawText = RawTextSelector.select(rawTextOrder, candidates)
+        val titleBlank = extras.strings(Notification.EXTRA_TITLE).all { it.isBlank() }
+        val candidateBlank = candidates.values.all { values -> values.all { it.isBlank() } }
         return AndroidNotificationSnapshot(
+            visibility = notification.visibility,
+            visibleTextBlank = titleBlank && candidateBlank,
             envelopeValues =
                 mapOf(
                     "actions" to notification.actions?.map(::safeAction).orEmpty(),

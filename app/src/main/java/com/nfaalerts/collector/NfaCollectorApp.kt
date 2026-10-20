@@ -4,7 +4,9 @@ import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
 import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
-import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
+import com.nfaalerts.collector.capture.CaptureDropReason
+import com.nfaalerts.collector.capture.CapturePath
+import com.nfaalerts.collector.capture.DurableCaptureDispatcher
 import com.nfaalerts.collector.capture.LightweightPostedNotification
 import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
@@ -33,10 +35,14 @@ import com.nfaalerts.collector.diagnostics.DiagnosticRepository
 import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
 import com.nfaalerts.collector.security.AndroidKeystoreBearerStore
 import com.nfaalerts.collector.security.BearerLoadState
+import com.nfaalerts.collector.config.SelectionLoadState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -159,12 +165,12 @@ class AppContainer(
             eventIdFactory = { UUID.randomUUID().toString() },
             clock = System::currentTimeMillis,
             dispatcher =
-                CoroutineCaptureDispatcher(
-                    scope = scope,
+                DurableCaptureDispatcher(
                     processor = captureProcessor::process,
                     diagnostics = listenerStatus,
                 ),
             initializationDiagnostics = listenerStatus,
+            dropLedger = ::noteCaptureDrop,
         )
 
     @Volatile
@@ -186,6 +192,30 @@ class AppContainer(
 
     fun shadeCatchUpActive(): Boolean =
         ShadeReconcilePace.degraded(listenerStatus.state.value.connected, networkAvailable)
+
+    fun awaitSelectionsReady() {
+        if (sourceSelections.loadState.value !is SelectionLoadState.Loading) return
+        runBlocking {
+            withTimeoutOrNull(SELECTION_READY_TIMEOUT_MS) {
+                while (sourceSelections.loadState.value is SelectionLoadState.Loading) {
+                    delay(SELECTION_READY_POLL_MS)
+                }
+            }
+        }
+    }
+
+    fun noteCaptureDrop(
+        reason: CaptureDropReason,
+        packageName: String,
+        capturePath: String,
+    ) {
+        if (reason == CaptureDropReason.ALLOWLIST_REJECT && capturePath == CapturePath.SHADE) return
+        listenerStatus.onDropped(reason, packageName, capturePath)
+        if (reason == CaptureDropReason.CATCH_UP_ALREADY_SAVED) return
+        scope.launch(Dispatchers.IO) {
+            recordCaptureDrop(reason, packageName, capturePath, count = 1)
+        }
+    }
 
     fun setNetworkAvailable(available: Boolean) {
         networkAvailable = available
@@ -360,8 +390,38 @@ class AppContainer(
                 },
                 onMissing = postedNotificationCallback::onNotificationPosted,
                 diagnostics = listenerStatus,
+                dropLedger = ::noteCaptureDrop,
             )
-        return catchUp.reconcile(notifications).imported
+        val result = catchUp.reconcile(notifications)
+        if (result.skippedExisting > 0) {
+            scope.launch(Dispatchers.IO) {
+                recordCaptureDrop(
+                    CaptureDropReason.CATCH_UP_ALREADY_SAVED,
+                    packageName = null,
+                    capturePath = CapturePath.SHADE,
+                    count = result.skippedExisting,
+                )
+            }
+        }
+        return result.imported
+    }
+
+    private suspend fun recordCaptureDrop(
+        reason: CaptureDropReason,
+        packageName: String?,
+        capturePath: String,
+        count: Int,
+    ) {
+        val values =
+            linkedMapOf<String, Any?>(
+                "errorCode" to reason.name,
+                "state" to capturePath,
+                "queue" to count,
+            )
+        if (packageName != null && DIAGNOSTIC_PACKAGE.matches(packageName)) {
+            values["packageName"] = packageName
+        }
+        runCatching { diagnostics.record("CAPTURE_DROPPED", values) }
     }
 
     private suspend fun runtimeDeliverySettings(): RuntimeDeliverySettings {
@@ -417,6 +477,12 @@ class AppContainer(
             ConfigLoadResult.IoFailure,
             -> CollectorConfigCodec().defaultDocument() to false
         }
+
+    private companion object {
+        const val SELECTION_READY_TIMEOUT_MS = 5_000L
+        const val SELECTION_READY_POLL_MS = 20L
+        val DIAGNOSTIC_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+")
+    }
 }
 
 private fun com.nfaalerts.collector.data.DiagnosticEventEntity.safeDetailsElement(): JsonElement =

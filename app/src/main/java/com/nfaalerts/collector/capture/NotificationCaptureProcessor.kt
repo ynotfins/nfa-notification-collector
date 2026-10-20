@@ -8,9 +8,7 @@ import com.nfaalerts.collector.data.DeliveryOutboxEntity
 import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.data.InitialDeliveryState
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -85,6 +83,19 @@ class NotificationCaptureProcessor(
     private fun buildRows(request: DispatchedNotification): Pair<CapturedNotificationEntity, DeliveryOutboxEntity> {
         val snapshot = reader.read(request.notificationHandle, request.source.rawTextOrder)
         val application = applicationMetadataResolver.resolve(request.identity.packageName, request.identity.uid)
+        val redaction =
+            classifySensitiveRedaction(
+                visibility = snapshot.visibility,
+                lockscreenVisibilityOverride = request.identity.ranking?.lockscreenVisibilityOverride,
+                channelLockscreenVisibility = request.identity.ranking?.channelLockscreenVisibility,
+                visibleTextBlank = snapshot.visibleTextBlank,
+            )
+        val notificationValues =
+            if (redaction == null) {
+                snapshot.envelopeValues
+            } else {
+                snapshot.envelopeValues + mapOf("contentDisposition" to redaction)
+            }
         val envelope =
             serializer.serialize(
                 mapOf(
@@ -96,7 +107,7 @@ class NotificationCaptureProcessor(
                         ),
                     "capturedAtEpochMillis" to request.capturedAtEpochMillis,
                     "clientEventId" to request.eventId,
-                    "notification" to snapshot.envelopeValues,
+                    "notification" to notificationValues,
                     "rawCandidates" to snapshot.rawTextSelection.candidates,
                     "rawTextSelectedField" to snapshot.rawTextSelection.selectedField?.configValue,
                     "source" to request.source.sourceId,
@@ -201,6 +212,7 @@ class NotificationCaptureProcessor(
             "postTimeEpochMillis" to identity.postTimeEpochMillis,
             "tag" to identity.tag,
             "userId" to identity.userId,
+            "ranking" to identity.ranking?.toEnvelopeMap(),
         )
 
     private fun envelopeIdentity(request: DispatchedNotification) =
@@ -295,27 +307,39 @@ class NotificationCaptureProcessor(
     }
 }
 
-class CoroutineCaptureDispatcher(
-    private val scope: CoroutineScope,
+private fun RankingSnapshot.toEnvelopeMap(): Map<String, Any?> =
+    mapOf(
+        "ambient" to ambient,
+        "channelId" to channelId,
+        "channelLockscreenVisibility" to channelLockscreenVisibility,
+        "importance" to importance,
+        "interruptionFilterMatch" to matchesInterruptionFilter,
+        "lastAudibleAlertAtEpochMillis" to lastAudibleAlertAtEpochMillis,
+        "lockscreenVisibilityOverride" to lockscreenVisibilityOverride,
+        "suppressedVisualEffects" to suppressedVisualEffects,
+        "suspended" to suspended,
+    )
+
+/**
+ * Writes the capture before returning. The listener callback must not return
+ * while the post exists only in a coroutine queue.
+ */
+class DurableCaptureDispatcher(
     private val processor: suspend (DispatchedNotification) -> Unit,
     private val diagnostics: CaptureDispatchDiagnostics,
 ) : CaptureDispatcher {
     override fun dispatch(request: DispatchedNotification) {
-        if (!scope.isActive) {
-            diagnostics.onDispatchRejected()
-            return
-        }
-        scope.launch {
-            diagnostics.onDispatchStarted()
-            try {
+        diagnostics.onDispatchStarted()
+        try {
+            runBlocking {
                 processor(request)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                diagnostics.onWorkerFailure(failure.javaClass.name)
-            } finally {
-                diagnostics.onDispatchFinished()
             }
+        } catch (cancelled: CancellationException) {
+            diagnostics.onWorkerFailure(cancelled.javaClass.name)
+        } catch (failure: Exception) {
+            diagnostics.onWorkerFailure(failure.javaClass.name)
+        } finally {
+            diagnostics.onDispatchFinished()
         }
     }
 }

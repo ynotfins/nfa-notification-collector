@@ -29,6 +29,9 @@ data class ListenerStatus(
     val catchUpImportedCount: Long = 0,
     val catchUpSkippedExistingCount: Long = 0,
     val lastCatchUpAtEpochMillis: Long? = null,
+    val allowlistRejectCount: Long = 0,
+    val autogroupSummarySkipCount: Long = 0,
+    val copyCloneFailureCount: Long = 0,
 )
 
 interface CaptureDispatchDiagnostics {
@@ -53,7 +56,8 @@ class ListenerStatusRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : CaptureDispatchDiagnostics,
     InitializationCaptureDiagnostics,
-    CatchUpDiagnostics {
+    CatchUpDiagnostics,
+    CaptureDropLedger {
     private val mutableState = MutableStateFlow(ListenerStatus())
     val state: StateFlow<ListenerStatus> = mutableState.asStateFlow()
 
@@ -82,7 +86,6 @@ class ListenerStatusRepository(
             it.copy(
                 catchUpExaminedCount = it.catchUpExaminedCount + result.examined.toLong(),
                 catchUpImportedCount = it.catchUpImportedCount + result.imported.toLong(),
-                catchUpSkippedExistingCount = it.catchUpSkippedExistingCount + result.skippedExisting.toLong(),
                 lastCatchUpAtEpochMillis = clock(),
             )
         }
@@ -132,6 +135,29 @@ class ListenerStatusRepository(
 
     override fun onInitializationOverflow() {
         mutableState.update { it.copy(initializationOverflowCount = it.initializationOverflowCount + 1) }
+    }
+
+    override fun onDropped(
+        reason: CaptureDropReason,
+        packageName: String,
+        capturePath: String,
+    ) {
+        mutableState.update { current ->
+            when (reason) {
+                CaptureDropReason.ALLOWLIST_REJECT ->
+                    current.copy(allowlistRejectCount = current.allowlistRejectCount + 1)
+                CaptureDropReason.AUTOGROUP_SUMMARY ->
+                    current.copy(autogroupSummarySkipCount = current.autogroupSummarySkipCount + 1)
+                CaptureDropReason.COPY_CLONE_FAILURE ->
+                    current.copy(copyCloneFailureCount = current.copyCloneFailureCount + 1)
+                CaptureDropReason.BUFFER_OVERFLOW ->
+                    current.copy(initializationOverflowCount = current.initializationOverflowCount + 1)
+                CaptureDropReason.CATCH_UP_ALREADY_SAVED ->
+                    current.copy(
+                        catchUpSkippedExistingCount = current.catchUpSkippedExistingCount + 1,
+                    )
+            }
+        }
     }
 
     override fun onInitializationBufferDrained() {

@@ -580,6 +580,47 @@ private fun DeliveryScreen(
         item { Text("Safe diagnostics", modifier = Modifier.semantics { heading() }) }
         item {
             RgdsCard(
+                title = "Phone standing",
+                subtitle = "What this phone can prove from inside the app",
+                badgeLabel = "GRANT",
+            ) {
+                Text("Notification access: ${snapshot.notificationAccessLabel}")
+                Text("Battery optimization: ${snapshot.batteryState}")
+                Text("Listener connected: ${if (snapshot.listenerConnected) "Yes" else "No"}")
+                Text(
+                    "Samsung Never sleeping apps cannot be read by the app. " +
+                        "Settings, Battery and device care, Battery, Background usage limits, Never sleeping apps. " +
+                        "Add NFA Notification Collector, MacroDroid, and BNN.",
+                )
+                Text(
+                    "PC check: scripts/device/verify-reliability-grants.ps1 " +
+                        "(idle whitelist and background app-ops).",
+                )
+            }
+        }
+        item {
+            RgdsCard(
+                title = "Capture health",
+                subtitle = "Listener, queue, and recorded skips since this app process started",
+                badgeLabel = "LIVE",
+            ) {
+                Text("Listener: ${if (snapshot.listenerConnected) "Connected" else "Disconnected"}")
+                Text("Last saved notification: ${formatCaptureTime(snapshot.lastCapture)}")
+                Text(
+                    "Queue depth: ${snapshot.queueCount} waiting to send, " +
+                        "${snapshot.captureBufferDepth} held until startup finishes, " +
+                        "${snapshot.captureWorkers} save in progress",
+                )
+                Text("Not in the selected apps: ${snapshot.allowlistRejectCount}")
+                Text("Group summaries skipped: ${snapshot.autogroupSkipCount}")
+                Text("Notification copy failed: ${snapshot.copyCloneFailureCount}")
+                Text("Startup buffer full: ${snapshot.bufferOverflowCount}")
+                Text("Catch-up already saved: ${snapshot.catchUpSkipCount}")
+                Text("These counts reset when the app process restarts. The log below keeps the newest reasons.")
+            }
+        }
+        item {
+            RgdsCard(
                 title = "Diagnostics export",
                 subtitle = "Secret-free health and retry evidence",
                 badgeLabel = "LOG",
@@ -650,6 +691,14 @@ private fun DeliveryScreen(
             confirmButton = { TextButton(onClick = { envelope = null }) { Text("Close") } },
         )
     }
+}
+
+private fun formatCaptureTime(value: String): String {
+    val epoch = value.toLongOrNull() ?: return if (value == "Unknown") "None yet" else value
+    return java.time.format.DateTimeFormatter
+        .ofPattern("yyyy-MM-dd HH:mm:ss")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(java.time.Instant.ofEpochMilli(epoch))
 }
 
 private data class DeliveryPresentation(

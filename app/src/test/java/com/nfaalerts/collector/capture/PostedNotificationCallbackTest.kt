@@ -125,6 +125,7 @@ class PostedNotificationCallbackTest {
                 dispatcher = dispatcher,
                 initializationDiagnostics = status,
                 initializationBufferCapacity = 2,
+                dropLedger = status,
             )
 
         assertTrue(callback.onNotificationPosted(postedInput("com.example.selected", Any()).copy(key = "one")))

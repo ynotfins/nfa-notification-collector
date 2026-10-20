@@ -84,6 +84,35 @@ class DiagnosticRepositoryTest {
         }
 
     @Test
+    fun `capture drops record a reason without notification text or a bearer`() =
+        runBlocking {
+            val store = RecordingDiagnosticStore()
+            val repository = DiagnosticRepository(store, clock = { 9L }, idFactory = { "drop-id" })
+
+            val recorded =
+                repository.record(
+                    "CAPTURE_DROPPED",
+                    mapOf(
+                        "errorCode" to "ALLOWLIST_REJECT",
+                        "packageName" to "com.example.other",
+                        "state" to "LIVE",
+                        "queue" to 1,
+                    ),
+                )
+            val bearer =
+                repository.record(
+                    "CAPTURE_DROPPED",
+                    mapOf("errorCode" to "Bearer sentinel-token"),
+                )
+
+            assertEquals(DiagnosticRecordResult.Recorded, recorded)
+            assertEquals(DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE"), bearer)
+            assertEquals("CAPTURE_DROPPED", store.rows.single().eventCode)
+            assertTrue(store.rows.single().safeDetailsJson.contains("ALLOWLIST_REJECT"))
+            assertFalse(store.rows.single().safeDetailsJson.contains("sentinel"))
+        }
+
+    @Test
     fun objectAndArrayValuesAreRejectedRatherThanStringified() =
         runBlocking {
             val store = RecordingDiagnosticStore()
