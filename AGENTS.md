@@ -5,15 +5,16 @@ This repository is the canonical source for the standalone native Android **NFA 
 ## Read order
 
 1. `AGENTS.md` and `CLAUDE.md`
-2. `.agentcore/PROJECT_CHARTER.md`
-3. `.agentcore/MILESTONES.md` and the active Milestone file
-4. `.agentcore/RISK_REGISTER.md` and `.agentcore/ACCEPTANCE_TESTS.md`
-5. `docs/AUTHORITY_AND_REFERENCE_MAP.md`
-6. `docs/PRODUCT_REQUIREMENTS.md`
-7. `docs/INGEST-CONTRACT.md`
-8. `docs/ANDROID_TOOLCHAIN_BASELINE.md`
-9. `docs/SECURITY-AND-DATA-HANDLING.md`
-10. `docs/DECISIONS_AND_STOP_GATES.md`
+2. `NFA_ALIGNMENT.md` and nfa-platform `docs/SISTER_ALIGNMENT.md`
+3. `.agentcore/PROJECT_CHARTER.md`
+4. `.agentcore/MILESTONES.md` and the active Milestone file
+5. `.agentcore/RISK_REGISTER.md` and `.agentcore/ACCEPTANCE_TESTS.md`
+6. `docs/AUTHORITY_AND_REFERENCE_MAP.md`
+7. `docs/PRODUCT_REQUIREMENTS.md`
+8. `docs/INGEST-CONTRACT.md`
+9. `docs/ANDROID_TOOLCHAIN_BASELINE.md`
+10. `docs/SECURITY-AND-DATA-HANDLING.md`
+11. `docs/DECISIONS_AND_STOP_GATES.md`
 
 ## Exact workspace boundary
 
@@ -55,6 +56,7 @@ Never edit or clean the two read-only workspace roots from this project. Never a
 - Documentation follows AgentCore documentation-guard/maintainer governance. Generated AgentCore projections are projection-worker-only.
 - Upstream Root Agent Rules Template status is `upstream_template_missing`: no discoverable template section currently exists in `MASTER_CONFIG_AND_PROMPT.md`. This project seed is explicitly authorized by the operator request and must be reconciled during M0; do not claim template parity.
 - No CRM.
+- Do not invent a second billing, ingest, county-routing, theme, or homeowner-identity story. Pins are in `NFA_ALIGNMENT.md`.
 
 ## Definition of a valid handoff
 
