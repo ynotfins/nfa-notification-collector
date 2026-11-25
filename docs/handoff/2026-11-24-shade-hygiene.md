@@ -84,6 +84,16 @@ bearer, and re-selected BNN. No undelivered rows were lost (the outbox was 100%
 SENT/202 before the incident). **Do not run `connectedDebugAndroidTest` on the
 primary phone.** Use `adb install -r` + `am instrument`.
 
+## Device-test side effects
+
+- `connectedDebugAndroidTest` uninstalls the app (above).
+- The settings import/export test previously restored approved defaults instead of
+  the real config, which wiped the operator's BNN selection (`"sources":[]`) and
+  silently stopped capture. It now backs up and restores the real config. Always
+  re-check Sources after a device test run.
+- The diagnostics export test inserts metadata-only rows into the real database and
+  now uses a unique id per run.
+
 ## Rollback
 
 1. `adb install -r -d <previous app-debug.apk>` (versionCode 1 / 0.1.0). Never
