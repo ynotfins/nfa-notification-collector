@@ -3,8 +3,9 @@
 ## Setup state
 
 - Notification Access missing: open the app's settings control and grant manually.
-- No sources: select BNN first; maximum ten.
-- Token missing/401: pause delivery and update the secure token; never inspect it through logs/ADB.
+- No sources: BNN auto-restores on the next app start when `us.bnn.newsapp` is installed. Other sources must be re-added or imported.
+- Settings/sources disappeared after a device test or reinstall: settings live in `files/collector-config.json` and survive restarts, reboots, and `adb install -r`; uninstall/clear-data deletes them. Use Settings → Import configuration to restore other sources. The BNN source returns automatically.
+- Token missing/401: pause delivery and update the secure token; never inspect it through logs/ADB. The Keystore bearer survives restarts/reboots/updates but not uninstall/clear-data; re-enter it after a reinstall.
 - Non-BNN `BLOCKED_CONTRACT`: expected until the separately approved multi-source gateway release exists.
 
 ## Delivery status

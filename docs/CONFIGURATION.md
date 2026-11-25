@@ -57,8 +57,10 @@ The ingest bearer is not part of JSON. It is entered through a secure Settings f
 
 - Up to ten enabled package configurations.
 - BNN top-level source remains `bnn`.
+- BNN auto-restores on app start when `us.bnn.newsapp` is installed and absent from the list. Other sources are never removed by that restore.
 - Before server approval, non-BNN events are captured locally as `BLOCKED_CONTRACT` and are not transmitted/retried.
 - Preserve ordered raw-text candidates and every candidate value locally.
+- The config file and the Keystore bearer survive restarts, reboots, and `adb install -r` updates. Uninstall or clear-data deletes them; BNN auto-restores, other sources/settings need Import configuration, and the bearer needs re-entry. Automatic cloud backup of the bearer is forbidden; an encrypted operator-driven backup is a separate approved design.
 
 ## Backup and data extraction policy
 

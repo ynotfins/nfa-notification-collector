@@ -153,6 +153,7 @@ class DiagnosticRepository(
                 "SHADE_ALERT",
                 "SHADE_CAP_GUARD",
                 "SHADE_DISMISSED",
+                "SOURCE_DEFAULT_RESTORED",
                 "STALE_SENDING_RECOVERED",
                 "CAPTURE_DROPPED",
             )

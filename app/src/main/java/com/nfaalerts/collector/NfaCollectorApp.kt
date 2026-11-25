@@ -24,9 +24,11 @@ import com.nfaalerts.collector.capture.ShadeSweepResult
 import com.nfaalerts.collector.config.AtomicCollectorConfigStore
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigLoadResult
+import com.nfaalerts.collector.config.DefaultSources
 import com.nfaalerts.collector.config.InstalledAppRepository
 import com.nfaalerts.collector.config.JsonSourceSelectionStore
 import com.nfaalerts.collector.config.SelectionLoadState
+import com.nfaalerts.collector.config.SelectionUpdate
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.contract.ContractSyncCoordinator
 import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
@@ -118,6 +120,7 @@ class AppContainer(
     private val clock: () -> Long = System::currentTimeMillis,
     internal val configStore: AtomicCollectorConfigStore = AtomicCollectorConfigStore(application.applicationContext),
 ) {
+    private val appContext = application.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutableLastDrainAt = MutableStateFlow<Long?>(null)
     val lastDrainAt: StateFlow<Long?> = mutableLastDrainAt.asStateFlow()
@@ -341,6 +344,7 @@ class AppContainer(
         scope.launch(Dispatchers.IO) {
             restoreListenerTimestamps()
             sourceSelections.load()
+            restoreDefaultSources()
             refreshShadePolicy()
             postedNotificationCallback.onSelectionLoadCompleted()
             runCatching { contractSync.maybeCheck(force = true) }
@@ -575,6 +579,24 @@ class AppContainer(
                     )
                 }
             }
+        }
+    }
+
+    private suspend fun restoreDefaultSources() {
+        if (sourceSelections.loadState.value !is SelectionLoadState.Ready) return
+        val bnnInstalled =
+            runCatching { appContext.packageManager.getPackageInfo(DefaultSources.BNN_PACKAGE, 0) }.isSuccess
+        val missing = DefaultSources.missingBnn(sourceSelections.snapshot().selections, bnnInstalled) ?: return
+        if (sourceSelections.upsert(missing) != SelectionUpdate.Accepted) return
+        runCatching {
+            diagnostics.record(
+                "SOURCE_DEFAULT_RESTORED",
+                mapOf(
+                    "packageName" to missing.packageName,
+                    "source" to missing.sourceId,
+                    "state" to "RESTORED",
+                ),
+            )
         }
     }
 
