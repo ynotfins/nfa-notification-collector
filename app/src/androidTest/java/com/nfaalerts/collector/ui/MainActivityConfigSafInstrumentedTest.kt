@@ -34,6 +34,7 @@ class MainActivityConfigSafInstrumentedTest {
 
     @Test
     fun productionSafImportReloadsVisibleSettingsAndSourcesAndReportsAllTransferOutcomes() {
+        val originalConfig = runBlocking { CollectorConfigRepository(context).exportPayload() }
         val defaults = CollectorConfigCodec().exportPayload(CollectorConfigCodec().defaultDocument())
         try {
             composeRule.activity.importConfiguration(ConfigTestProvider.seed("defaults", defaults, context))
@@ -105,11 +106,12 @@ class MainActivityConfigSafInstrumentedTest {
             composeRule.onNodeWithText("Configuration export failed.").assertIsDisplayed()
         } finally {
             runBlocking {
-                CollectorConfigRepository(context).savePayload(defaults)
+                CollectorConfigRepository(context).savePayload(originalConfig)
                 (composeRule.activity.application as com.nfaalerts.collector.NfaCollectorApp)
                     .appContainer.sourceSelections
                     .load()
             }
+            originalConfig.fill(0)
             defaults.fill(0)
             ConfigTestProvider.clear()
         }

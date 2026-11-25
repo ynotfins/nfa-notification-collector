@@ -53,7 +53,10 @@ Test-drift repairs (test-only, no product behavior change)
 - delivery flush uses the current `flush-now` tag and current message text;
 - diagnostics export row uses a unique id and a future timestamp so live rows do
   not displace it;
-- installed-app icon cache bound raised from 512 to 4096 for a device with 859 apps.
+- installed-app icon cache bound raised from 512 to 4096 for a device with 859 apps;
+- the settings import/export test now backs up and restores the real config instead
+  of writing approved defaults. Earlier runs wiped the operator's BNN selection
+  (`"sources":[]`), which silently stopped capture until BNN was re-selected.
 
 Known non-blocking artifact
 ---------------------------
