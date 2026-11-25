@@ -59,7 +59,13 @@ class CaptureReliabilityTest {
             assertTrue(callback.onNotificationPosted(input))
             assertTrue(callback.onNotificationPosted(input))
             assertEquals(2, dispatcher.requests.size)
-            assertEquals(2, dispatcher.requests.map { it.eventId }.toSet().size)
+            assertEquals(
+                2,
+                dispatcher.requests
+                    .map { it.eventId }
+                    .toSet()
+                    .size,
+            )
 
             val saved = mutableSetOf("com.example.selected|android-key|1000")
             val drops = RecordingDropLedger()
@@ -115,7 +121,13 @@ class CaptureReliabilityTest {
             CaptureDropReason.AUTOGROUP_SUMMARY,
             autogroupAdmission(summary, NotificationFlags.GROUP_SUMMARY, NotificationFlags.LOCAL_ONLY),
         )
-        assertNull(autogroupAdmission(NotificationFlags.GROUP_SUMMARY, NotificationFlags.GROUP_SUMMARY, NotificationFlags.LOCAL_ONLY))
+        assertNull(
+            autogroupAdmission(
+                NotificationFlags.GROUP_SUMMARY,
+                NotificationFlags.GROUP_SUMMARY,
+                NotificationFlags.LOCAL_ONLY,
+            ),
+        )
     }
 
     @Test
@@ -180,7 +192,12 @@ class CaptureReliabilityTest {
 
         assertTrue(callback.onNotificationPosted(posted("com.example.selected").copy(ranking = ranking)))
 
-        assertEquals(ranking, dispatcher.requests.single().identity.ranking)
+        assertEquals(
+            ranking,
+            dispatcher.requests
+                .single()
+                .identity.ranking,
+        )
     }
 
     private fun readyCallback(

@@ -144,18 +144,27 @@ class ListenerStatusRepository(
     ) {
         mutableState.update { current ->
             when (reason) {
-                CaptureDropReason.ALLOWLIST_REJECT ->
+                CaptureDropReason.ALLOWLIST_REJECT -> {
                     current.copy(allowlistRejectCount = current.allowlistRejectCount + 1)
-                CaptureDropReason.AUTOGROUP_SUMMARY ->
+                }
+
+                CaptureDropReason.AUTOGROUP_SUMMARY -> {
                     current.copy(autogroupSummarySkipCount = current.autogroupSummarySkipCount + 1)
-                CaptureDropReason.COPY_CLONE_FAILURE ->
+                }
+
+                CaptureDropReason.COPY_CLONE_FAILURE -> {
                     current.copy(copyCloneFailureCount = current.copyCloneFailureCount + 1)
-                CaptureDropReason.BUFFER_OVERFLOW ->
+                }
+
+                CaptureDropReason.BUFFER_OVERFLOW -> {
                     current.copy(initializationOverflowCount = current.initializationOverflowCount + 1)
-                CaptureDropReason.CATCH_UP_ALREADY_SAVED ->
+                }
+
+                CaptureDropReason.CATCH_UP_ALREADY_SAVED -> {
                     current.copy(
                         catchUpSkippedExistingCount = current.catchUpSkippedExistingCount + 1,
                     )
+                }
             }
         }
     }

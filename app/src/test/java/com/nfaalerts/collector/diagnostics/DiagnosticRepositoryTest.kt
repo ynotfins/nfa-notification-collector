@@ -108,8 +108,18 @@ class DiagnosticRepositoryTest {
             assertEquals(DiagnosticRecordResult.Recorded, recorded)
             assertEquals(DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE"), bearer)
             assertEquals("CAPTURE_DROPPED", store.rows.single().eventCode)
-            assertTrue(store.rows.single().safeDetailsJson.contains("ALLOWLIST_REJECT"))
-            assertFalse(store.rows.single().safeDetailsJson.contains("sentinel"))
+            assertTrue(
+                store.rows
+                    .single()
+                    .safeDetailsJson
+                    .contains("ALLOWLIST_REJECT"),
+            )
+            assertFalse(
+                store.rows
+                    .single()
+                    .safeDetailsJson
+                    .contains("sentinel"),
+            )
         }
 
     @Test
