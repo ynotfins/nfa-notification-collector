@@ -58,7 +58,9 @@ Use clear boundaries for notification serialization, configuration, secure secre
 - The selected package set is the only listener allowlist.
 - Each selected package has enabled state, source ID, and ordered raw-text field priority.
 - BNN source ID is `bnn`; discover its actual package from the device. Historical evidence `us.bnn.newsapp` is not authority.
+- BNN is the first-class source and returns automatically on app start when `us.bnn.newsapp` is installed and absent from the source list. The restore never removes or changes any other source.
 - Until a multi-source server amendment is separately approved, non-BNN selected notifications are captured and retained locally with delivery state `BLOCKED_CONTRACT`. They must not be sent under a false `bnn` source and must not loop retries.
+- Source selections and all non-secret settings persist in `files/collector-config.json` across app restarts, reboots, and `adb install -r` updates. The Keystore-backed bearer persists across the same events. Android deletes app-private data on uninstall or clear-data; after that, BNN auto-restores, other sources/settings must be imported, and the bearer must be re-entered. An encrypted, passphrase-protected backup/provisioning design for commercial reinstall or device migration is a separate approved secret-handling decision.
 
 ### Notification envelope
 

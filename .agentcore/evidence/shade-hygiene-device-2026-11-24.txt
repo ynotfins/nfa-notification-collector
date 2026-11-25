@@ -42,7 +42,24 @@ serverIngestId. Examples:
     capturedAt=1795583729657 sentAt=1795583730028 roomToSentMs=371
   path=SHADE state=SENT http=202 ingest=040c03a4-a9b2-421f-9182-a9846dd011bd
     capturedAt=1795583729643 sentAt=1795583730041 roomToSentMs=398
-Room -> HTTPS 202 is 210-1149 ms, under the 3 s target.
+Room -> HTTPS 202 is 210-1149 ms for catch-up imports and 620-698 ms for brand-new
+live BNN alerts, under the 3 s target.
+
+Live post -> Room -> 202 (brand-new alerts, path=LIVE)
+-----------------------------------------------------
+  event=05018832-478a-4f68-a079-0513b25e0954 path=LIVE state=SENT http=202
+    ingest=67987a13-0c46-4bf1-ab1f-89a424cf1473
+    postTime=1795585645663 capturedAt=1795585646130 sentAt=1795585646283
+    postToSentMs=620 roomToSentMs=153
+  event=982de695-fbfe-47c2-8909-005d51265448 path=LIVE state=SENT http=202
+    ingest=86c1fe77-7a5d-4e90-81f7-4efb1e242c92
+    postTime=1795585182581 capturedAt=1795585183127 sentAt=1795585183279
+    postToSentMs=698 roomToSentMs=152
+
+The one alert missed during an instrumentation restart was recovered by shade
+catch-up (path=SHADE, postTime=1795584141453, capturedAt=1795585019508,
+roomToSentMs=358), then delivered 202. BNN shade remains at 10 children + 1
+summary after the sweep.
 
 Shade catch-up (requirement 6)
 ------------------------------
@@ -68,8 +85,9 @@ protected shade/capture rows are not evicted by it.
 
 Still unverified
 ----------------
-- A brand-new live BNN alert (postTime == capture time) has not yet occurred since
-  the reinstall. Room->202 is proven under 3 s; live post->Room->202 awaits the next
-  BNN alert.
 - 24-hour soak with zero cap rejections has not elapsed.
 - Locked-screen overnight idle proof remains open (pre-existing).
+- Uninstall/clear-data is the only event that loses settings/token; the operator
+  accepted re-entry after an uninstall. Normal restarts, reboots, and
+  `adb install -r` preserve the config, BNN selection, and Keystore bearer
+  (verified: same 226-byte bearer file and timestamp after `adb install -r`).

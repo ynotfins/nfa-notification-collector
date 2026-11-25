@@ -68,11 +68,12 @@ immediately but refills.
 - Instrumentation on SM-S948U: **78/78 OK** via `adb shell am instrument`.
   `ShadeHygieneInstrumentedTest` posts 60 selected-source notifications: all 60 in
   Room, max shade count <= 40, no OS rejection.
-- Live device: 16 BNN rows, all `SENT`/202 with UUID ingestIds; Room -> 202 is
-  210–1149 ms. `capturePath='SHADE'` rows now exist (5 catch-up imports) and the
-  still-visible live-captured alerts are skipped. BNN shade settled at exactly
-  10 alerts + 1 summary. Zero `already posted or enqueued 50` lines for BNN in the
-  current buffer.
+- Live device: 19 BNN rows, all `SENT`/202 with UUID ingestIds. Brand-new live
+  alerts reached 202 in **620 ms** and **698 ms** (post -> Room -> 202); catch-up
+  imports reached 202 in 210–1149 ms. `capturePath='SHADE'` rows exist (one alert
+  missed during an instrumentation restart was recovered and delivered). BNN shade
+  settled at exactly 10 alerts + 1 summary. Zero `already posted or enqueued 50`
+  lines for BNN in the current buffer.
 
 ## Test-runner incident (important)
 
@@ -104,11 +105,11 @@ primary phone.** Use `adb install -r` + `am instrument`.
 
 ## Still unverified
 
-- A brand-new live BNN alert (postTime == capture time) has not occurred since the
-  reinstall; Room -> 202 is proven under 3 s, live post -> Room -> 202 awaits the
-  next BNN alert.
 - 24-hour soak with zero BNN cap rejections has not elapsed.
 - Locked-screen overnight idle proof remains open (pre-existing M7 gate).
+- Uninstall/clear-data is the only event that loses settings/token; the operator
+  accepted re-entry after an uninstall. Normal restarts, reboots, and
+  `adb install -r` preserve the config, BNN selection, and Keystore bearer.
 
 ## Out of scope (report only)
 
