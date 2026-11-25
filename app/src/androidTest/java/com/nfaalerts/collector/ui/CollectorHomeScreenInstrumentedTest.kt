@@ -72,8 +72,11 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Queue").performClick()
-        composeRule.onNodeWithText("Send queued alerts now").performClick()
-        composeRule.onNodeWithText("Flush completed: 3 queue item(s) attempted in capture order.").assertIsDisplayed()
+        composeRule.onNodeWithTag("delivery-list").performScrollToNode(hasTestTag("flush-now"))
+        composeRule.onNodeWithTag("flush-now").performClick()
+        composeRule
+            .onNodeWithText("Flush completed: 3 sendable item(s) attempted in capture order.")
+            .assertIsDisplayed()
         composeRule.runOnIdle { assertEquals(1, repository.flushCalls) }
     }
 
@@ -88,6 +91,7 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Enter token"))
         composeRule.onNodeWithText("Enter token").performClick()
         composeRule.runOnIdle {
             assertTrue(
@@ -115,6 +119,7 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Enter token"))
         composeRule.onNodeWithText("Enter token").performClick()
         composeRule.onNodeWithTag("bearer-token-editor").performTextInput("short")
         composeRule.onNodeWithText("Save token").performClick()
@@ -141,6 +146,7 @@ class CollectorHomeScreenInstrumentedTest {
         }
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Token saved · last updated", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Replace token"))
         composeRule.onNodeWithText("Replace token").performClick()
         composeRule.onNodeWithText("Replace saved token").assertIsDisplayed()
         composeRule.onNodeWithTag("bearer-token-editor").performTextInput("replacement-not-saved")
@@ -266,11 +272,17 @@ class CollectorHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Enter token"))
         composeRule.onNodeWithText("Enter token").performClick()
         composeRule.onNodeWithTag("bearer-token-editor").performTextInput("a".repeat(41) + "-_")
         composeRule.onNodeWithText("Save token").performClick()
 
         composeRule.onNodeWithText("Enter bearer token").assertDoesNotExist()
+        composeRule
+            .onNodeWithTag("settings-list")
+            .performScrollToNode(
+                hasText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry."),
+            )
         composeRule
             .onNodeWithText("Token saved, but delivery requeue failed. Re-enter the token or restart the app to retry.")
             .assertIsDisplayed()

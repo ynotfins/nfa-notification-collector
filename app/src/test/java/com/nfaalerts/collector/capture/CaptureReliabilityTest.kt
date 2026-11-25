@@ -115,6 +115,36 @@ class CaptureReliabilityTest {
     }
 
     @Test
+    fun `a stalled persistence write is bounded and reported`() {
+        val failures = mutableListOf<String>()
+        val diagnostics =
+            object : CaptureDispatchDiagnostics {
+                override fun onDispatchStarted() = Unit
+
+                override fun onDispatchFinished() = Unit
+
+                override fun onDispatchRejected() = Unit
+
+                override fun onWorkerFailure(failureType: String) {
+                    failures += failureType
+                }
+            }
+        val dispatcher =
+            DurableCaptureDispatcher(
+                processor = { kotlinx.coroutines.awaitCancellation() },
+                diagnostics = diagnostics,
+                timeoutMillis = 50L,
+            )
+
+        val started = System.nanoTime()
+        dispatcher.dispatch(request("event-timeout"))
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+        assertTrue("elapsedMs=$elapsedMs", elapsedMs < 2_000)
+        assertEquals(listOf(DurableCaptureDispatcher.DISPATCH_TIMEOUT), failures)
+    }
+
+    @Test
     fun `autogroup summary is a recorded skip and a child is not`() {
         val summary = NotificationFlags.GROUP_SUMMARY or NotificationFlags.LOCAL_ONLY
         assertEquals(

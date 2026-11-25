@@ -15,8 +15,8 @@ android {
         applicationId = "com.nfaalerts.collector"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -69,6 +69,9 @@ dependencies {
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // Compose UI testing still pulls Espresso 3.5.0 transitively, which
+    // reflects the InputManager.getInstance method removed in Android 16.
+    androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(libs.androidx.room3.testing)
     androidTestImplementation(libs.compose.ui.test.junit4)

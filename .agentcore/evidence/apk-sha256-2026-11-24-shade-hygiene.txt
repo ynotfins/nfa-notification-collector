@@ -1,0 +1,21 @@
+APK — 2026-11-24 shade hygiene
+================================
+Path:    app/build/outputs/apk/debug/app-debug.apk
+SHA-256: 60f5b304cffb454668d19da124f172a8a20fb8f8773224d80b83a873d6b3a7af
+Size:    13,743,494 bytes (debug, debug-signed)
+Package: com.nfaalerts.collector
+versionCode: 2
+versionName: 0.2.0
+Installed on: SM-S948U / R3GL605J0AH
+Install command: adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+Previous installed build (now replaced):
+  versionCode 1 / versionName 0.1.0
+  base.apk SHA-256 prefix 5bfdcba3…2975 (unmerged goal/phase3-reliability-standing)
+  That build is preserved by this branch's first commit (86c871c + ktlint fix).
+
+Android test APK:
+  app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+  Installed with adb install -r; run with adb shell am instrument.
+
+Rollback: adb install -r -d <previous app-debug.apk> (never uninstall, clear data, or force-stop).

@@ -160,6 +160,8 @@ class DiagnosticRepositoryTest {
         val rows = mutableListOf<DiagnosticEventEntity>()
         var lastCutoff = 0L
         var lastMaxRows = 0
+        var lastProtectedCodes = emptyList<String>()
+        var lastProtectedMaxRows = 0
 
         override suspend fun insert(event: DiagnosticEventEntity) {
             rows += event
@@ -168,9 +170,13 @@ class DiagnosticRepositoryTest {
         override suspend fun prune(
             cutoffEpochMillis: Long,
             maxRows: Int,
+            protectedEventCodes: List<String>,
+            protectedMaxRows: Int,
         ) {
             lastCutoff = cutoffEpochMillis
             lastMaxRows = maxRows
+            lastProtectedCodes = protectedEventCodes
+            lastProtectedMaxRows = protectedMaxRows
         }
     }
 }

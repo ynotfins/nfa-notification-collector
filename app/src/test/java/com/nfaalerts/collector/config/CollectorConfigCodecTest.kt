@@ -29,7 +29,36 @@ class CollectorConfigCodecTest {
         assertEquals(100_000, document.config.retention.maxSentRows)
         assertEquals(90, document.config.diagnostics.retentionDays)
         assertEquals(50_000, document.config.diagnostics.maxRows)
+        assertEquals(10, document.config.shade.keepNewestPerPackage)
         assertFalse(document.root.toString().contains("maxAttempts"))
+    }
+
+    @Test
+    fun shadeKeepNewestIsBoundedAndDefaultsForOlderConfigs() {
+        val legacy = """{"configVersion":1,"sources":[]}""".encodeToByteArray()
+        assertEquals(
+            10,
+            (codec.decode(legacy) as ConfigDecodeResult.Valid)
+                .document.config.shade.keepNewestPerPackage,
+        )
+
+        listOf(0, -1, 31).forEach { value ->
+            val result =
+                codec.decode(
+                    """{"configVersion":1,"sources":[],"shade":{"keepNewestPerPackage":$value}}"""
+                        .encodeToByteArray(),
+                ) as ConfigDecodeResult.Invalid
+            assertTrue(
+                "value=$value",
+                result.errors.any { it.path == "/shade/keepNewestPerPackage" && it.code == "INTEGER_RANGE" },
+            )
+        }
+
+        val boundary =
+            codec.decode(
+                """{"configVersion":1,"sources":[],"shade":{"keepNewestPerPackage":30}}""".encodeToByteArray(),
+            )
+        assertTrue(boundary is ConfigDecodeResult.Valid)
     }
 
     @Test

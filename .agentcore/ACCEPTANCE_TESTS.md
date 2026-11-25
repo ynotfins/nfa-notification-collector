@@ -22,9 +22,10 @@
 | AT-M5-2 | M5 | Payload fits limits with explicit projection markers | UTF-8 measurements | pending | |
 | AT-M6-1 | M6 | Full tests/lint/static/dependency/build gates pass | command logs | pending | |
 | AT-M6-2 | M6 | Debug APK path/hash verified | artifact + SHA-256 | pending | |
-| AT-M6-3 | M6 | APK installed on exact Samsung when connected | ADB evidence | passed | SM-S948U `R3GL605J0AH`; `com.nfaalerts.collector` 0.1.0; `.agentcore/evidence/reliability-hardening-2026-10-01.json` |
+| AT-M6-3 | M6 | APK installed on exact Samsung when connected | ADB evidence | passed | SM-S948U `R3GL605J0AH`; `com.nfaalerts.collector` 0.2.0 / versionCode 2; `.agentcore/evidence/apk-sha256-2026-11-24-shade-hygiene.txt` |
 | AT-M6-4 | M6 | Real BNN status-bar notifications captured locally and committed remotely under locked idle | phone/local/server comparison + locked ≥15m | open | Shade inventory 49/49 already in Room (2026-10-01); locked idle with a *new* BNN post + HTTPS 202 still required — BNN Incidents UI alone is not acceptance |
 | AT-M6-5 | M6 | Second source passes only after server approval | decision + evidence | pending | |
+| AT-M6-6 | M6 | Shade hygiene keeps selected apps under Android's 50-notification cap | 60-post instrumentation + device shade counts + no cap logcat + SENT/202 rows | passed (device); 24 h soak open | `.agentcore/evidence/shade-hygiene-device-2026-11-24.txt`; `.agentcore/evidence/shade-hygiene-tests-2026-11-24.txt` |
 | AT-M7-1 | M7 | Operational docs, Git, ledger and handoff complete | final review/commits | pending | |
 
 Device/Tailscale rows may be `blocked_external`; they prevent corresponding live claims but not offline APK completion.

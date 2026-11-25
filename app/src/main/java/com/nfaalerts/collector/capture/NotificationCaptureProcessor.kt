@@ -9,6 +9,7 @@ import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.data.InitialDeliveryState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -322,18 +323,24 @@ private fun RankingSnapshot.toEnvelopeMap(): Map<String, Any?> =
 
 /**
  * Writes the capture before returning. The listener callback must not return
- * while the post exists only in a coroutine queue.
+ * while the post exists only in a coroutine queue, but a stalled Room write must
+ * not stall every later capture either: the blocking wait is bounded.
  */
 class DurableCaptureDispatcher(
     private val processor: suspend (DispatchedNotification) -> Unit,
     private val diagnostics: CaptureDispatchDiagnostics,
+    private val timeoutMillis: Long = DISPATCH_TIMEOUT_MS,
 ) : CaptureDispatcher {
     override fun dispatch(request: DispatchedNotification) {
         diagnostics.onDispatchStarted()
         try {
-            runBlocking {
-                processor(request)
-            }
+            val completed =
+                runBlocking {
+                    withTimeoutOrNull(timeoutMillis) {
+                        processor(request)
+                    } != null
+                }
+            if (!completed) diagnostics.onWorkerFailure(DISPATCH_TIMEOUT)
         } catch (cancelled: CancellationException) {
             diagnostics.onWorkerFailure(cancelled.javaClass.name)
         } catch (failure: Exception) {
@@ -341,5 +348,10 @@ class DurableCaptureDispatcher(
         } finally {
             diagnostics.onDispatchFinished()
         }
+    }
+
+    companion object {
+        const val DISPATCH_TIMEOUT = "DISPATCH_TIMEOUT"
+        const val DISPATCH_TIMEOUT_MS = 5_000L
     }
 }

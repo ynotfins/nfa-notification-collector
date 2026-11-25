@@ -3,7 +3,7 @@
 Measured device truth (2026-10-01, serial `R3GL605J0AH`):
 
 - Model: SM-S948U (Galaxy S26 Ultra), Android 16 / One UI
-- Package installed: `com.nfaalerts.collector` versionName `0.1.0`
+- Package installed: `com.nfaalerts.collector` versionName `0.2.0` (versionCode 2)
 - Debug APK baseline: `artifacts/NFA-Notification-Collector.apk`
 - BNN package discovered on device: `us.bnn.newsapp`
 - Notification Access is granted for the collector listener
@@ -27,6 +27,12 @@ Use only the SDK-owned ADB for one acceptance run:
 Record authorization, model, product, Android release/API, security patch and installed package version. If no/unauthorized device is present, stop only device acceptance; do not claim installation.
 
 Never pass the ingest bearer in ADB commands, intents, shell history or logcat filters.
+
+Never run `./gradlew connectedDebugAndroidTest` against this phone: the AGP/UTP
+driver uninstalls the app under test after the run and deletes its Room database and
+Keystore bearer. Install with `adb install -r` and run device tests with
+`adb shell am instrument -w -r com.nfaalerts.collector.test/androidx.test.runner.AndroidJUnitRunner`.
+Never uninstall, clear data, or force-stop the collector.
 
 ## PC scripts (no root)
 

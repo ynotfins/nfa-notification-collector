@@ -32,6 +32,11 @@ data class ListenerStatus(
     val allowlistRejectCount: Long = 0,
     val autogroupSummarySkipCount: Long = 0,
     val copyCloneFailureCount: Long = 0,
+    val shadeDismissedCount: Long = 0,
+    val shadeCapGuardCount: Long = 0,
+    val shadeAlertPackages: Set<String> = emptySet(),
+    val shadeActiveCounts: Map<String, Int> = emptyMap(),
+    val lastShadeSweepAtEpochMillis: Long? = null,
 )
 
 interface CaptureDispatchDiagnostics {
@@ -121,6 +126,18 @@ class ListenerStatusRepository(
 
     fun onPostedCallbackFailure() {
         mutableState.update { it.copy(postedCallbackFailureCount = it.postedCallbackFailureCount + 1) }
+    }
+
+    fun onShadeSweep(result: ShadeSweepResult) {
+        mutableState.update {
+            it.copy(
+                shadeDismissedCount = it.shadeDismissedCount + result.dismissedCount,
+                shadeCapGuardCount = it.shadeCapGuardCount + result.capGuardPackages.size,
+                shadeAlertPackages = result.alertPackages.toSet(),
+                shadeActiveCounts = result.observedCounts,
+                lastShadeSweepAtEpochMillis = clock(),
+            )
+        }
     }
 
     override fun onInitializationBuffered(depth: Int) {

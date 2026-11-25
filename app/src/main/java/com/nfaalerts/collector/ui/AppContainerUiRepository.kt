@@ -175,6 +175,13 @@ class AppContainerUiRepository internal constructor(
                 copyCloneFailureCount = core.listener.copyCloneFailureCount,
                 bufferOverflowCount = core.listener.initializationOverflowCount,
                 catchUpSkipCount = core.listener.catchUpSkippedExistingCount,
+                shadeDismissedCount = core.listener.shadeDismissedCount,
+                shadeCapGuardCount = core.listener.shadeCapGuardCount,
+                shadeAlertPackages = core.listener.shadeAlertPackages,
+                shadeLargestCount =
+                    core.listener.shadeActiveCounts.values
+                        .maxOrNull() ?: 0,
+                shadeKeepNewest = document.config.shade.keepNewestPerPackage,
                 liveVerificationFingerprint = currentKey,
             )
         }.stateIn(

@@ -14,7 +14,7 @@
 | M6 | APK and Samsung acceptance | Verified APK and every available device/BNN/second-source/Tailscale row | passed | `milestones/M6-apk-device.md` | M5 passed | artifact/device evidence |
 | M7 | Closeout and handoff | Operational docs, independent review, Git/evidence/handoff complete | pending | `milestones/M7-closeout.md` | M6 non-device gates passed | final report/handoff |
 
-M0–M6 match `.agentcore/checklists/state.json` (`passed` on 2026-08-18 through 2026-09-18). M7 stays pending until a live speed proof of the 3-second catch-up exists. Do not mark M7 passed before that proof.
+M0–M6 match `.agentcore/checklists/state.json` (`passed` on 2026-08-18 through 2026-09-18). M7 stays pending until a live speed proof of the 3-second catch-up exists. Do not mark M7 passed before that proof. 2026-11-24 shade hygiene adds AT-M6-6 (60-post cap proof passed on device; 24 h soak still open).
 
 ## Rules
 

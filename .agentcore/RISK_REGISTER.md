@@ -16,5 +16,7 @@
 | R12 | Signing secret unavailable | high | low | debug APK baseline, signed build conditional | release owner | open | |
 | R13 | Captured content leaks through backup/screenshot/log/data extraction | medium | high | `allowBackup=false` or approved encrypted backup policy; FLAG_SECURE on secret/full-envelope screens where appropriate; redacted bounded logs; device tests | security owner | open | |
 | R14 | BNN Incidents UI entries without status-bar notifications look like collector misses | high | medium | accept only against `us.bnn.newsapp` notifications; document UI≠notification boundary | capture owner | open | 2026-10-01: 49/49 active shade BNN tags already in collector DB |
+| R15 | Selected app reaches Android's 50-notification cap and the OS silently rejects every new post | high | critical | shade hygiene: dismiss after `SENT`, keep newest N, cap guard at 40, alert at 45, group summaries excluded, separate diagnostic retention, instrumentation proof with 60 posts | capture owner | mitigating | 2026-11-24 root cause verified on S26; 78/78 instrumentation incl. 60-post cap test; 24h soak pending |
+| R16 | Device-test runner uninstalls the app and deletes Room/Keystore | medium | critical | never run `connectedDebugAndroidTest` on the primary phone; `adb install -r` + `am instrument`; operator-only restore checklist | validation owner | mitigating | 2026-11-24 incident evidence; reinstall + operator restore done |
 
 Any future `accepted` risk requires explicit approver and evidence.

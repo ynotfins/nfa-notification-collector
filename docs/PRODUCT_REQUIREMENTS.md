@@ -110,11 +110,25 @@ One unsupported value must not discard the rest of the extras bundle. The local 
 - Recover in-flight state after process death/reboot and schedule due work reliably.
 - Bound sent/history/diagnostic retention while never deleting pending work silently.
 
+### Shade hygiene (Android's 50-notification cap)
+
+Android silently rejects every new post from an app that already holds 50 active notifications. BNN posts one notification per alert and never cancels old ones, so an unmanaged shade fills in about a day and every later BNN alert is dropped by the OS before any listener can see it.
+
+- After a selected-source notification is durably persisted **and** its outbox row is `SENT` (validated `202`), dismiss it with `NotificationListenerService.cancelNotification(key)`.
+- Keep the newest `N` per selected package visible. `N` defaults to 10 and is configurable in Settings (`shade.keepNewestPerPackage`, 1–30).
+- Never dismiss a notification whose capture is not yet `SENT` during routine hygiene. A persisted-but-unsent capture may be dismissed only by the cap guard below, because the Room row is the durable copy.
+- Never dismiss a notification from a non-selected package and never dismiss a notification that has no Room row.
+- **Cap guard:** on every post and on the existing reconcile pass, count active notifications for each selected package. At 40 or more, dismiss the oldest persisted notifications until the count is back at `N`, preferring `SENT` over persisted-but-unsent. Record `SHADE_CAP_GUARD` with the before/after counts.
+- **Group summaries:** ignore autogroup and group-summary notifications when counting; they are removed with their children.
+- **Operator alert:** if a selected package still has 45 or more active notifications after the guard ran (dismissal failed), raise a high-priority local collector notification and show the state on the Status screen.
+- **Diagnostics retention:** selected-source and shade events keep their own bounded retention; a non-selected package that posts about once a second must not evict them. Non-selected `ALLOWLIST_REJECT` is aggregated instead of written per event.
+- **Shade catch-up:** reconcile imports a still-visible notification only when its package/key/postTime identity is not already in Room. `capturePath='SHADE'` is therefore expected to stay at zero while live capture is healthy; it appears only for a genuinely missed post.
+
 ### UI
 
 Use Material 3 with a guided first run and four primary areas:
 
-- Status: readiness, permission, endpoint, selected count, queue, last capture/send/error/listener state.
+- Status: readiness, permission, endpoint, selected count, queue, last capture/send/error/listener state, and shade pressure (largest selected package, dismissals, cap guards, at-risk packages).
 - Sources: searchable app picker, icons, `X / 10`, system toggle, per-source editor.
 - Delivery: immutable captured rows, state/status/attempts, retry failed, safe detail view, secret-free diagnostics.
 - Settings: endpoint profiles, device ID, secure bearer field, retry/retention settings, JSON config, import/export, permission and battery links.

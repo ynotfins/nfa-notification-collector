@@ -79,8 +79,26 @@ class NfaNotificationListenerService : NotificationListenerService() {
                 }
         serviceScope.launch {
             appContainer().reconcileActiveNotifications(active)
+            appContainer().requestShadeHygiene()
         }
     }
+
+    /**
+     * Shade snapshot for hygiene only. Group summaries are returned with their
+     * flag set so the planner can ignore them; they are never dismissed alone.
+     */
+    internal fun activeShadeNotifications(): List<ShadeNotification> =
+        runCatching { activeNotifications?.toList().orEmpty() }
+            .getOrDefault(emptyList())
+            .map { sbn ->
+                ShadeNotification(
+                    packageName = sbn.packageName,
+                    key = sbn.key,
+                    postTimeEpochMillis = sbn.postTime,
+                    isGroupSummary = sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+                    isClearable = sbn.isClearable,
+                )
+            }
 
     private fun handlePosted(
         sbn: StatusBarNotification,
@@ -99,6 +117,8 @@ class NfaNotificationListenerService : NotificationListenerService() {
             appContainer().postedNotificationCallback.onNotificationPosted(toLightweight(sbn, ranking))
         } catch (_: Throwable) {
             appContainer().listenerStatus.onPostedCallbackFailure()
+        } finally {
+            appContainer().requestShadeHygiene()
         }
     }
 
@@ -114,11 +134,26 @@ class NfaNotificationListenerService : NotificationListenerService() {
             suppressedVisualEffects = ranking.suppressedVisualEffects,
             matchesInterruptionFilter = ranking.matchesInterruptionFilter(),
             ambient = ranking.isAmbient,
-            lastAudibleAlertAtEpochMillis = ranking.lastAudiblyAlertedMillis,
+            lastAudibleAlertAtEpochMillis =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ranking.lastAudiblyAlertedMillis
+                } else {
+                    null
+                },
             channelId = channel?.id,
-            lockscreenVisibilityOverride = ranking.lockscreenVisibilityOverride,
+            lockscreenVisibilityOverride =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    ranking.lockscreenVisibilityOverride
+                } else {
+                    null
+                },
             channelLockscreenVisibility = channel?.lockscreenVisibility,
-            suspended = ranking.isSuspended,
+            suspended =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    ranking.isSuspended
+                } else {
+                    false
+                },
         )
     }
 

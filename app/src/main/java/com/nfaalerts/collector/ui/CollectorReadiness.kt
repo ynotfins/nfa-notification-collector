@@ -121,6 +121,11 @@ data class CollectorUiSnapshot(
     val copyCloneFailureCount: Long = 0,
     val bufferOverflowCount: Long = 0,
     val catchUpSkipCount: Long = 0,
+    val shadeDismissedCount: Long = 0,
+    val shadeCapGuardCount: Long = 0,
+    val shadeAlertPackages: Set<String> = emptySet(),
+    val shadeLargestCount: Int = 0,
+    val shadeKeepNewest: Int = 10,
     internal val liveVerificationFingerprint: LiveVerificationFingerprint? = null,
 ) {
     val operationallyHealthy: Boolean

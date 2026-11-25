@@ -122,8 +122,8 @@ class MainActivityConfigSafInstrumentedTest {
             runBlocking {
                 database.diagnosticsDao().insertFromRepository(
                     DiagnosticEventEntity(
-                        diagnosticId = "diag-export-1",
-                        createdAtEpochMillis = 1234L,
+                        diagnosticId = "diag-export-${System.nanoTime()}",
+                        createdAtEpochMillis = Long.MAX_VALUE - 1,
                         eventCode = "DELIVERY_RETRY",
                         safeDetailsJson = """{"eventId":"event-1","errorCode":"HTTP_503"}""",
                     ),
