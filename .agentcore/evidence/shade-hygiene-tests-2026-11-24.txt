@@ -56,7 +56,12 @@ Test-drift repairs (test-only, no product behavior change)
 - installed-app icon cache bound raised from 512 to 4096 for a device with 859 apps;
 - the settings import/export test now backs up and restores the real config instead
   of writing approved defaults. Earlier runs wiped the operator's BNN selection
-  (`"sources":[]`), which silently stopped capture until BNN was re-selected.
+  (`"sources":[]`), which silently stopped capture until BNN was re-selected;
+- the canonical-config test now uses temporary file names instead of writing and
+  deleting the production `collector-config.json`;
+- after the full 79-test suite, the BNN source and the 226-byte Keystore bearer were
+  still present, and the BNN shade was 10 children + 1 summary. A deliberate wipe
+  followed by a normal app start auto-restored BNN.
 
 Known non-blocking artifact
 ---------------------------

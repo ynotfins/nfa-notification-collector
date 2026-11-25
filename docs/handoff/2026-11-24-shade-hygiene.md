@@ -90,8 +90,14 @@ primary phone.** Use `adb install -r` + `am instrument`.
 - `connectedDebugAndroidTest` uninstalls the app (above).
 - The settings import/export test previously restored approved defaults instead of
   the real config, which wiped the operator's BNN selection (`"sources":[]`) and
-  silently stopped capture. It now backs up and restores the real config. Always
-  re-check Sources after a device test run.
+  silently stopped capture. It now backs up and restores the real config.
+- `ConfigAndRepositoryInstrumentedTest.canonicalCollectorConfigPersistsAndReopensSelections`
+  previously wrote and then **deleted** the production `collector-config.json`. It now
+  uses temporary canonical/legacy file names and never touches production data.
+- After the full 79-test suite, the BNN source and the 226-byte Keystore bearer were
+  still present, and the BNN shade was 10 children + 1 summary. A deliberate wipe
+  followed by a normal app start auto-restored BNN.
+- Always re-check Sources after a device test run.
 - The diagnostics export test inserts metadata-only rows into the real database and
   now uses a unique id per run.
 

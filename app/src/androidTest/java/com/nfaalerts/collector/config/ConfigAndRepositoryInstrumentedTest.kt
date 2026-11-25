@@ -34,20 +34,22 @@ class ConfigAndRepositoryInstrumentedTest {
     @Test
     fun canonicalCollectorConfigPersistsAndReopensSelections() =
         runBlocking {
-            val fileName = "collector-config.json"
+            val fileName = "collector-config-test-${System.nanoTime()}.json"
+            val legacyName = "collector-source-selection-test-${System.nanoTime()}.json"
             try {
                 val selection = source("com.example.persisted")
-                JsonSourceSelectionStore(context).save(listOf(selection))
+                JsonSourceSelectionStore(context, fileName, legacyName).save(listOf(selection))
 
-                val reopened = JsonSourceSelectionStore(context).load()
+                val reopened = JsonSourceSelectionStore(context, fileName, legacyName).load()
                 val root = Json.parseToJsonElement(File(context.filesDir, fileName).readText()).jsonObject
                 assertEquals("1", root.getValue("configVersion").jsonPrimitive.content)
                 assertEquals(selection, reopened.single())
                 assertTrue("sources" in root)
-                assertFalse(File(context.filesDir, "collector-source-selection-v1.json").exists())
+                assertFalse(File(context.filesDir, legacyName).exists())
             } finally {
                 File(context.filesDir, fileName).delete()
                 File(context.filesDir, "$fileName.bak").delete()
+                File(context.filesDir, legacyName).delete()
             }
         }
 
