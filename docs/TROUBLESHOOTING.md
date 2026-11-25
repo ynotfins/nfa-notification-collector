@@ -71,6 +71,36 @@ Android **Settings → Notification history** is proof the OS posted the notific
 
 BNN’s **in-app Incidents** list can show items that never appear as Android notifications. That is a different surface from Notification History. Collector can only capture what `us.bnn.newsapp` posts to the notification shade.
 
+## BNN alerts stop while the collector looks healthy (50-notification cap)
+
+Android allows one app at most 50 active notifications. Once a selected app reaches that limit, `NotificationManagerService` rejects every new post before any listener sees it. Logcat shows:
+
+```
+E/NotificationService: Package has already posted or enqueued 50 notifications. Not showing more. package=us.bnn.newsapp
+```
+
+The collector cannot capture what the OS never posted. Shade hygiene (0.2.0+) prevents this:
+
+- delivered notifications are dismissed after their Room row is `SENT`;
+- the newest `N` per selected package stay visible (`shade.keepNewestPerPackage`, default 10);
+- at 40 active, the cap guard dismisses persisted rows down to `N`;
+- at 45+ after the guard, a high-priority collector notification appears and the Status screen shows the at-risk package;
+- group summaries are ignored and never counted.
+
+Diagnostics `SHADE_CAP_GUARD`, `SHADE_DISMISSED`, and `SHADE_ALERT` keep their own retention, so a noisy non-selected package cannot evict them. If the Status screen shows shade pressure, check Notification Access and let the guard run; do not clear BNN data or uninstall the collector.
+
+## Device tests must not uninstall the app
+
+`./gradlew connectedDebugAndroidTest` makes the AGP/Unified Test Platform driver uninstall the app under test after the run. On 2026-11-24 this deleted the collector's Room database and Keystore bearer. Use:
+
+```powershell
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument -w -r com.nfaalerts.collector.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Never uninstall, clear data, or force-stop the collector; force-stop blocks notification delivery.
+
 ## Safe diagnostics
 
 Diagnostics may contain timestamps, package/source, event UUID, state, attempt count, HTTP status and non-secret error codes. They must not contain bearer/ciphertext/keys, complete private notification content by default, request headers, exported JSON secrets, DB credentials or raw stack data that embeds payloads.

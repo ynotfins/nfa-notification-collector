@@ -30,9 +30,16 @@ reports/
 desktop.ini
 Thumbs.db
 
+# Python cache from device scripts
+**/__pycache__/
+*.pyc
+
 # Private device dumps / soak oracles (may contain notification content)
 docs/evidence/notif_dump.txt
 docs/evidence/*.events.log
 docs/evidence/*-oracle*
 docs/evidence/room-export*
 docs/evidence/logcat*
+docs/evidence/*.db
+docs/evidence/*.db-*
+docs/evidence/soak-oracle/

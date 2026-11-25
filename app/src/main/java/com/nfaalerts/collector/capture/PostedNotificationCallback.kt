@@ -18,6 +18,7 @@ data class LightweightPostedNotification(
     val overrideGroupKey: String? = null,
     val notificationHandle: Any,
     val capturePath: String = CapturePath.LIVE,
+    val ranking: RankingSnapshot? = null,
 )
 
 data class NotificationIdentity(
@@ -32,6 +33,7 @@ data class NotificationIdentity(
     val isClearable: Boolean,
     val groupKey: String? = null,
     val overrideGroupKey: String? = null,
+    val ranking: RankingSnapshot? = null,
 )
 
 data class DispatchedNotification(
@@ -55,6 +57,7 @@ class PostedNotificationCallback(
     private val dispatcher: CaptureDispatcher,
     private val initializationDiagnostics: InitializationCaptureDiagnostics = NoOpInitializationCaptureDiagnostics,
     private val initializationBufferCapacity: Int = INITIALIZATION_BUFFER_CAPACITY,
+    private val dropLedger: CaptureDropLedger = NoOpCaptureDropLedger,
 ) {
     private val initializationLock = Any()
     private val initializationBuffer = ArrayDeque<BufferedNotification>()
@@ -68,7 +71,7 @@ class PostedNotificationCallback(
         synchronized(initializationLock) {
             if (!initializationComplete) {
                 if (initializationBuffer.size >= initializationBufferCapacity) {
-                    initializationDiagnostics.onInitializationOverflow()
+                    dropLedger.onDropped(CaptureDropReason.BUFFER_OVERFLOW, input.packageName, input.capturePath)
                     return false
                 }
                 initializationBuffer +=
@@ -108,7 +111,11 @@ class PostedNotificationCallback(
         eventId: String? = null,
         capturedAtEpochMillis: Long? = null,
     ): Boolean {
-        val source = allowlist.sourceFor(input.packageName) ?: return false
+        val source = allowlist.sourceFor(input.packageName)
+        if (source == null) {
+            dropLedger.onDropped(CaptureDropReason.ALLOWLIST_REJECT, input.packageName, input.capturePath)
+            return false
+        }
         dispatcher.dispatch(
             DispatchedNotification(
                 eventId = eventId ?: eventIdFactory(),
@@ -126,6 +133,7 @@ class PostedNotificationCallback(
                         isClearable = input.isClearable,
                         groupKey = input.groupKey,
                         overrideGroupKey = input.overrideGroupKey,
+                        ranking = input.ranking,
                     ),
                 source = source,
                 notificationHandle = input.notificationHandle,

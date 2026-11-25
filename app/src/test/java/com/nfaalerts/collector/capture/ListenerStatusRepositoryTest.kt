@@ -1,8 +1,5 @@
 package com.nfaalerts.collector.capture
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,29 +26,10 @@ class ListenerStatusRepositoryTest {
     }
 
     @Test
-    fun `cancelled application scope rejects dispatch without running processor`() {
-        val status = ListenerStatusRepository(clock = { 1L })
-        val job = SupervisorJob().apply { cancel() }
-        var processed = false
-        val dispatcher =
-            CoroutineCaptureDispatcher(
-                scope = CoroutineScope(job + Dispatchers.Unconfined),
-                diagnostics = status,
-                processor = { processed = true },
-            )
-
-        dispatcher.dispatch(request())
-
-        assertFalse(processed)
-        assertEquals(1L, status.state.value.dispatchRejectedCount)
-    }
-
-    @Test
     fun `worker exception is contained and recorded by type only`() {
         val status = ListenerStatusRepository(clock = { 1L })
         val dispatcher =
-            CoroutineCaptureDispatcher(
-                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            DurableCaptureDispatcher(
                 diagnostics = status,
                 processor = { error("private message") },
             )

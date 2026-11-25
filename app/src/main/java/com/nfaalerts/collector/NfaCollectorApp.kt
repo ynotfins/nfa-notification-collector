@@ -4,22 +4,34 @@ import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
 import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
-import com.nfaalerts.collector.capture.CoroutineCaptureDispatcher
+import com.nfaalerts.collector.capture.CaptureDropReason
+import com.nfaalerts.collector.capture.CapturePath
+import com.nfaalerts.collector.capture.DurableCaptureDispatcher
 import com.nfaalerts.collector.capture.LightweightPostedNotification
 import com.nfaalerts.collector.capture.ListenerStatusRepository
 import com.nfaalerts.collector.capture.NfaNotificationListenerService
 import com.nfaalerts.collector.capture.NotificationCaptureProcessor
 import com.nfaalerts.collector.capture.PostedNotificationCallback
+import com.nfaalerts.collector.capture.ShadeCaptureLookup
+import com.nfaalerts.collector.capture.ShadeCaptureState
+import com.nfaalerts.collector.capture.ShadeDismisser
+import com.nfaalerts.collector.capture.ShadeEvent
+import com.nfaalerts.collector.capture.ShadeHygiene
+import com.nfaalerts.collector.capture.ShadeNotification
+import com.nfaalerts.collector.capture.ShadePolicy
 import com.nfaalerts.collector.capture.ShadeReconcilePace
+import com.nfaalerts.collector.capture.ShadeSweepResult
 import com.nfaalerts.collector.config.AtomicCollectorConfigStore
 import com.nfaalerts.collector.config.CollectorConfigCodec
 import com.nfaalerts.collector.config.ConfigLoadResult
 import com.nfaalerts.collector.config.InstalledAppRepository
 import com.nfaalerts.collector.config.JsonSourceSelectionStore
+import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.contract.ContractSyncCoordinator
 import com.nfaalerts.collector.contract.PhoneAlertsContractCatalog
 import com.nfaalerts.collector.data.CollectorStatusAggregate
+import com.nfaalerts.collector.data.DeliveryState
 import com.nfaalerts.collector.data.NfaCollectorDatabase
 import com.nfaalerts.collector.delivery.BearerLoad
 import com.nfaalerts.collector.delivery.DeliveryCoordinator
@@ -33,15 +45,19 @@ import com.nfaalerts.collector.diagnostics.DiagnosticRepository
 import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
 import com.nfaalerts.collector.security.AndroidKeystoreBearerStore
 import com.nfaalerts.collector.security.BearerLoadState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -54,6 +70,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class NfaCollectorApp : Application() {
     lateinit var appContainer: AppContainer
@@ -108,6 +125,15 @@ class AppContainer(
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
     val listenerStatus = ListenerStatusRepository()
+    private val shadeAlertNotifier = ShadeAlertNotifier(application)
+    private val shadeSweepInFlight = AtomicBoolean(false)
+
+    @Volatile
+    private var cachedShadePolicy = ShadePolicy()
+
+    private val allowlistRejectLock = Any()
+    private var pendingAllowlistRejectCount = 0
+    private var lastAllowlistRejectFlushAtEpochMillis = 0L
 
     @Volatile
     private var networkAvailable: Boolean = false
@@ -131,6 +157,7 @@ class AppContainer(
             transport = IngestTransport(ingestClient::send),
             scheduler = deliveryScheduler,
             paceLimiter = DrainPaceLimiter(),
+            onDelivered = { requestShadeHygiene() },
         )
     }
     private val contractSync by lazy {
@@ -159,13 +186,49 @@ class AppContainer(
             eventIdFactory = { UUID.randomUUID().toString() },
             clock = System::currentTimeMillis,
             dispatcher =
-                CoroutineCaptureDispatcher(
-                    scope = scope,
+                DurableCaptureDispatcher(
                     processor = captureProcessor::process,
                     diagnostics = listenerStatus,
                 ),
             initializationDiagnostics = listenerStatus,
+            dropLedger = ::noteCaptureDrop,
         )
+
+    private val shadeHygiene: ShadeHygiene by lazy {
+        ShadeHygiene(
+            lookup =
+                ShadeCaptureLookup { packageName, notifications ->
+                    val rows =
+                        database
+                            .captureReadDao()
+                            .deliveryStatesForPackage(packageName, notifications.map(ShadeNotification::key).distinct())
+                    val byIdentity =
+                        rows.associateBy {
+                            ShadeNotification.identityOf(it.notificationKey, it.postTimeEpochMillis)
+                        }
+                    notifications.associate { notification ->
+                        val state =
+                            when (byIdentity[notification.identity]?.state) {
+                                DeliveryState.SENT -> ShadeCaptureState.SENT
+                                null -> ShadeCaptureState.NOT_PERSISTED
+                                else -> ShadeCaptureState.PERSISTED
+                            }
+                        notification.identity to state
+                    }
+                },
+            dismisser =
+                ShadeDismisser { key ->
+                    val listener = activeListenerRef?.get() ?: return@ShadeDismisser false
+                    runCatching { listener.cancelNotification(key) }.isSuccess
+                },
+            policyProvider = { cachedShadePolicy },
+            onEvent = ::onShadeEvent,
+            recount = {
+                delay(SHADE_RECOUNT_SETTLE_MS)
+                activeShadeNotifications()
+            },
+        )
+    }
 
     @Volatile
     private var activeListenerRef: WeakReference<NfaNotificationListenerService>? = null
@@ -184,8 +247,77 @@ class AppContainer(
         activeListenerRef?.get()?.reconcileActiveNotifications()
     }
 
+    internal fun activeShadeNotifications(): List<ShadeNotification> =
+        activeListenerRef?.get()?.activeShadeNotifications().orEmpty()
+
     fun shadeCatchUpActive(): Boolean =
         ShadeReconcilePace.degraded(listenerStatus.state.value.connected, networkAvailable)
+
+    fun awaitSelectionsReady() {
+        if (sourceSelections.loadState.value !is SelectionLoadState.Loading) return
+        runBlocking {
+            withTimeoutOrNull(SELECTION_READY_TIMEOUT_MS) {
+                while (sourceSelections.loadState.value is SelectionLoadState.Loading) {
+                    delay(SELECTION_READY_POLL_MS)
+                }
+            }
+        }
+    }
+
+    fun noteCaptureDrop(
+        reason: CaptureDropReason,
+        packageName: String,
+        capturePath: String,
+    ) {
+        if (reason == CaptureDropReason.ALLOWLIST_REJECT && capturePath == CapturePath.SHADE) return
+        listenerStatus.onDropped(reason, packageName, capturePath)
+        when (reason) {
+            CaptureDropReason.CATCH_UP_ALREADY_SAVED -> {
+                return
+            }
+
+            CaptureDropReason.ALLOWLIST_REJECT -> {
+                recordAggregatedAllowlistReject(packageName)
+                return
+            }
+
+            else -> {
+                Unit
+            }
+        }
+        scope.launch(Dispatchers.IO) {
+            recordCaptureDrop(reason, packageName, capturePath, count = 1)
+        }
+    }
+
+    /**
+     * A non-selected package (gptos.intelligence.assistant) rejects about once a
+     * second. One row per event filled the 2,000-row diagnostic cap in minutes
+     * and evicted the selected-source evidence. Keep the in-memory counter exact
+     * and persist a bounded aggregate row instead.
+     */
+    private fun recordAggregatedAllowlistReject(packageName: String) {
+        val flushCount =
+            synchronized(allowlistRejectLock) {
+                pendingAllowlistRejectCount += 1
+                val now = clock()
+                if (now - lastAllowlistRejectFlushAtEpochMillis < ALLOWLIST_AGGREGATE_INTERVAL_MS) {
+                    return
+                }
+                lastAllowlistRejectFlushAtEpochMillis = now
+                pendingAllowlistRejectCount.also { pendingAllowlistRejectCount = 0 }
+            }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                recordCaptureDrop(
+                    CaptureDropReason.ALLOWLIST_REJECT,
+                    packageName = packageName,
+                    capturePath = CapturePath.LIVE,
+                    count = flushCount,
+                )
+            }
+        }
+    }
 
     fun setNetworkAvailable(available: Boolean) {
         networkAvailable = available
@@ -209,6 +341,7 @@ class AppContainer(
         scope.launch(Dispatchers.IO) {
             restoreListenerTimestamps()
             sourceSelections.load()
+            refreshShadePolicy()
             postedNotificationCallback.onSelectionLoadCompleted()
             runCatching { contractSync.maybeCheck(force = true) }
             recoverDeliveryOnStartup()
@@ -234,6 +367,7 @@ class AppContainer(
     }
 
     suspend fun onRelevantConfigurationChanged() {
+        refreshShadePolicy()
         val now = clock()
         relevantRevision()?.let { database.deliveryDao().requeuePausedAuth(it, now) }
         database.deliveryDao().nextDueAtEpochMillis()?.let(deliveryScheduler::ensureScheduled)
@@ -242,6 +376,16 @@ class AppContainer(
     suspend fun nextDeliveryDueAt(): Long? = database.deliveryDao().nextDueAtEpochMillis()
 
     internal suspend fun recentDeliveryInspection() = database.captureReadDao().recentDeliveryInspection(100)
+
+    internal suspend fun capturedCountByTagPrefix(
+        packageName: String,
+        tagPrefix: String,
+    ): Int = database.captureReadDao().captureCountByTagPrefix(packageName, tagPrefix)
+
+    internal suspend fun deleteCapturedByTagPrefix(
+        packageName: String,
+        tagPrefix: String,
+    ): Int = database.captureWriteDao().deleteCapturesByTagPrefix(packageName, tagPrefix)
 
     internal fun deliveryInspectionFlow() = database.captureReadDao().recentDeliveryInspectionFlow(100)
 
@@ -327,7 +471,14 @@ class AppContainer(
                     document.config.diagnostics.retentionDays
                         .toLong(),
                 )
-        database.diagnosticsDao().prune(diagnosticCutoff, document.config.diagnostics.maxRows)
+        database
+            .diagnosticsDao()
+            .prune(
+                diagnosticCutoff,
+                document.config.diagnostics.maxRows,
+                DiagnosticRepository.PROTECTED_EVENT_CODES.toList(),
+                DiagnosticRepository.PROTECTED_MAX_ROWS,
+            )
     }
 
     private fun startImmediateDeliveryAfterPersist(
@@ -352,6 +503,90 @@ class AppContainer(
         scope.launch { runDeliveryDrain("immediate-$eventId", maximumClaims = 1) }
     }
 
+    /**
+     * Dismisses delivered notifications and keeps every selected package under
+     * Android's 50-notification ceiling. Runs off the listener thread and is
+     * single-flight: a burst of posts coalesces into one sweep.
+     */
+    fun requestShadeHygiene() {
+        if (activeListenerRef?.get() == null) return
+        if (!shadeSweepInFlight.compareAndSet(false, true)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val active = activeShadeNotifications()
+                shadeHygiene.sweep(sourceSelections.snapshot().packageNames, active)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Shade hygiene must never take capture down.
+            } finally {
+                shadeSweepInFlight.set(false)
+            }
+        }
+    }
+
+    private suspend fun onShadeEvent(event: ShadeEvent) {
+        when (event) {
+            is ShadeEvent.Swept -> {
+                listenerStatus.onShadeSweep(event.result)
+                shadeAlertNotifier.publish(
+                    event.result.alertPackages.associateWith { event.result.observedCounts[it] ?: 0 },
+                )
+            }
+
+            is ShadeEvent.Dismissed -> {
+                runCatching {
+                    diagnostics.record(
+                        "SHADE_DISMISSED",
+                        mapOf(
+                            "packageName" to event.packageName,
+                            "dismissed" to event.count,
+                            "sent" to event.sentCount,
+                            "persisted" to event.persistedCount,
+                            "state" to "DISMISSED",
+                        ),
+                    )
+                }
+            }
+
+            is ShadeEvent.CapGuard -> {
+                runCatching {
+                    diagnostics.record(
+                        "SHADE_CAP_GUARD",
+                        mapOf(
+                            "packageName" to event.packageName,
+                            "active" to event.beforeCount,
+                            "remaining" to event.afterCount,
+                            "state" to "CAP_GUARD",
+                        ),
+                    )
+                }
+            }
+
+            is ShadeEvent.Alert -> {
+                runCatching {
+                    diagnostics.record(
+                        "SHADE_ALERT",
+                        mapOf(
+                            "packageName" to event.packageName,
+                            "active" to event.count,
+                            "state" to "ALERT",
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshShadePolicy() {
+        cachedShadePolicy =
+            ShadePolicy(
+                keepNewestPerPackage =
+                    loadConfigDocument()
+                        .first.config.shade.keepNewestPerPackage,
+            )
+    }
+
     suspend fun reconcileActiveNotifications(notifications: List<LightweightPostedNotification>): Int {
         val catchUp =
             ActiveNotificationCatchUp(
@@ -360,8 +595,38 @@ class AppContainer(
                 },
                 onMissing = postedNotificationCallback::onNotificationPosted,
                 diagnostics = listenerStatus,
+                dropLedger = ::noteCaptureDrop,
             )
-        return catchUp.reconcile(notifications).imported
+        val result = catchUp.reconcile(notifications)
+        if (result.skippedExisting > 0) {
+            scope.launch(Dispatchers.IO) {
+                recordCaptureDrop(
+                    CaptureDropReason.CATCH_UP_ALREADY_SAVED,
+                    packageName = null,
+                    capturePath = CapturePath.SHADE,
+                    count = result.skippedExisting,
+                )
+            }
+        }
+        return result.imported
+    }
+
+    private suspend fun recordCaptureDrop(
+        reason: CaptureDropReason,
+        packageName: String?,
+        capturePath: String,
+        count: Int,
+    ) {
+        val values =
+            linkedMapOf<String, Any?>(
+                "errorCode" to reason.name,
+                "state" to capturePath,
+                "queue" to count,
+            )
+        if (packageName != null && DIAGNOSTIC_PACKAGE.matches(packageName)) {
+            values["packageName"] = packageName
+        }
+        runCatching { diagnostics.record("CAPTURE_DROPPED", values) }
     }
 
     private suspend fun runtimeDeliverySettings(): RuntimeDeliverySettings {
@@ -417,6 +682,14 @@ class AppContainer(
             ConfigLoadResult.IoFailure,
             -> CollectorConfigCodec().defaultDocument() to false
         }
+
+    private companion object {
+        const val SELECTION_READY_TIMEOUT_MS = 5_000L
+        const val SELECTION_READY_POLL_MS = 20L
+        const val SHADE_RECOUNT_SETTLE_MS = 250L
+        const val ALLOWLIST_AGGREGATE_INTERVAL_MS = 5 * 60_000L
+        val DIAGNOSTIC_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+")
+    }
 }
 
 private fun com.nfaalerts.collector.data.DiagnosticEventEntity.safeDetailsElement(): JsonElement =

@@ -29,6 +29,7 @@ data class SettingsDraft(
     val maxSentRows: String,
     val diagnosticsDays: String,
     val diagnosticsMaxRows: String,
+    val keepNewestPerPackage: String = "10",
     val recentsLocked: Boolean,
 ) {
     fun resetToApprovedDefaults(): SettingsDraft = from(CollectorConfigCodec().defaultDocument())
@@ -76,6 +77,10 @@ data class SettingsDraft(
             (preservedRoot["reliability"] as? JsonObject).withFields(
                 "recentsLocked" to JsonPrimitive(recentsLocked),
             )
+        root["shade"] =
+            (preservedRoot["shade"] as? JsonObject).withFields(
+                "keepNewestPerPackage" to numeric(keepNewestPerPackage),
+            )
         return JsonObject(root)
     }
 
@@ -100,6 +105,7 @@ data class SettingsDraft(
                 maxSentRows = config.retention.maxSentRows.toString(),
                 diagnosticsDays = config.diagnostics.retentionDays.toString(),
                 diagnosticsMaxRows = config.diagnostics.maxRows.toString(),
+                keepNewestPerPackage = config.shade.keepNewestPerPackage.toString(),
                 recentsLocked = config.reliability.recentsLocked,
             )
         }

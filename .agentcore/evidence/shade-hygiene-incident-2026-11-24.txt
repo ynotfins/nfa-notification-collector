@@ -1,0 +1,46 @@
+Incident — 2026-11-24, S26 R3GL605J0AH
+=====================================
+
+What happened
+-------------
+Running `./gradlew connectedDebugAndroidTest` to execute the new
+ShadeHygieneInstrumentedTest caused the Android Gradle Plugin / Unified Test
+Platform driver to uninstall the app under test:
+
+  20:11:40.931  adbd: adbd service requested 'shell:pm uninstall com.nfaalerts.collector'
+  20:11:40.948  PackageManager: 0002/{caller=android.uid.shell:2000, ver=2, pkg=com.nfaalerts.collector}
+  20:11:40.952  app_process: System.exit called, status: 0
+
+The test process died with INSTRUMENTATION_RESULT: shortMsg=Process crashed.
+The device was connected twice (USB R3GL605J0AH and adb-tls), so the runner
+started on two transports; the USB transport reported "Starting 0 tests" and
+then uninstalled the app.
+
+Impact
+------
+- `com.nfaalerts.collector` is no longer installed; its Room database and
+  Keystore bearer are gone with the uninstall.
+- The task evidence says the outbox was 100% SENT/202 before this, so no
+  undelivered alert rows were lost. The gateway already holds every delivered
+  row.
+- Notification Access, the Keystore bearer, and battery exemption were lost and
+  must be restored by the operator (all operator-only actions).
+
+Recovery
+--------
+1. Reinstalled the new build with `adb install -r` (no uninstall):
+   app/build/outputs/apk/debug/app-debug.apk
+   SHA-256 ddbce0b3f35a73a125f0a66bfa80c906beff0b971fc9b423b9267d25e5b038c5
+   versionCode 2 / versionName 0.2.0
+2. Operator re-grants Notification Access and re-enters the bearer token.
+3. Future instrumentation runs use `adb shell am instrument` against manually
+   installed APKs. `connectedDebugAndroidTest` is NOT run again on this device.
+
+Logcat excerpt (metadata only, no notification content)
+-------------------------------------------------------
+I TestRunner: started: sixtySelectedPostsStayUnderTheOsCapAndAllLandInRoom(com.nfaalerts.collector.capture.ShadeHygieneInstrumentedTest)
+I adbd    : adbd service requested 'shell:pm uninstall com.nfaalerts.collector ; echo utp_shell_exit_code=$?'
+I PackageManager: 0002/{caller=android.uid.shell:2000, ver=2, pkg=com.nfaalerts.collector}
+I AndroidRuntime: VM exiting with result code 0.
+INSTRUMENTATION_RESULT: shortMsg=Process crashed.
+INSTRUMENTATION_CODE: 0

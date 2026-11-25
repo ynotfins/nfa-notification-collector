@@ -1,5 +1,6 @@
 package com.nfaalerts.collector
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -196,6 +197,10 @@ internal fun captureStayAwake(context: Context): CaptureStayAwake {
         object : StayAwakeLock {
             override fun isHeld(): Boolean = wakeLock.isHeld
 
+            // The foreground reliability service owns this partial lock for its
+            // whole lifetime and releases it in onDestroy; a timeout would let the
+            // CPU sleep mid-capture on a device that is already idle-restricted.
+            @SuppressLint("WakelockTimeout")
             override fun acquire() {
                 wakeLock.acquire()
             }

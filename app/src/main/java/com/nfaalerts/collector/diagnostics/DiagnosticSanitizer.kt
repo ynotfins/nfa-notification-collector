@@ -23,6 +23,8 @@ interface DiagnosticStore {
     suspend fun prune(
         cutoffEpochMillis: Long,
         maxRows: Int,
+        protectedEventCodes: List<String>,
+        protectedMaxRows: Int,
     )
 }
 
@@ -34,8 +36,10 @@ internal class RoomDiagnosticStore(
     override suspend fun prune(
         cutoffEpochMillis: Long,
         maxRows: Int,
+        protectedEventCodes: List<String>,
+        protectedMaxRows: Int,
     ) {
-        dao.prune(cutoffEpochMillis, maxRows)
+        dao.prune(cutoffEpochMillis, maxRows, protectedEventCodes, protectedMaxRows)
     }
 }
 
@@ -45,6 +49,8 @@ class DiagnosticRepository(
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
     private val retentionDays: Int = 14,
     private val maxRows: Int = 2_000,
+    private val protectedEventCodes: Set<String> = PROTECTED_EVENT_CODES,
+    private val protectedMaxRows: Int = PROTECTED_MAX_ROWS,
 ) {
     suspend fun record(
         eventCode: String,
@@ -79,9 +85,11 @@ class DiagnosticRepository(
             ),
         )
         val cutoff = now - TimeUnit.DAYS.toMillis(retentionDays.toLong())
-        store.prune(cutoff, maxRows)
+        store.prune(cutoff, maxRows, protectedCodes(), protectedMaxRows)
         return DiagnosticRecordResult.Recorded
     }
+
+    private fun protectedCodes(): List<String> = (protectedEventCodes.ifEmpty { setOf("") }).toList()
 
     private fun safeObject(values: Map<String, Any?>): String? {
         val safe = linkedMapOf<String, JsonElement>()
@@ -118,6 +126,7 @@ class DiagnosticRepository(
             "packageName" -> value is String && PACKAGE_NAME.matches(value)
             "source" -> value is String && SAFE_LOWER_TOKEN.matches(value)
             "attempt", "createdAt", "httpStatus", "nextAttemptAt", "queue" -> value is Number
+            "active", "dismissed", "persisted", "remaining", "sent" -> value is Number
             else -> false
         }
 
@@ -141,12 +150,32 @@ class DiagnosticRepository(
                 "LISTENER_CONNECTED",
                 "LISTENER_DISCONNECTED",
                 "LISTENER_REJECTED",
+                "SHADE_ALERT",
+                "SHADE_CAP_GUARD",
+                "SHADE_DISMISSED",
                 "STALE_SENDING_RECOVERED",
+                "CAPTURE_DROPPED",
             )
+
+        /**
+         * Selected-source evidence and shade decisions keep their own bounded
+         * retention. A non-selected package that posts about once a second must
+         * not evict the rows that explain why alerts were dropped.
+         */
+        val PROTECTED_EVENT_CODES =
+            setOf(
+                "CAPTURE_PERSISTED",
+                "SHADE_ALERT",
+                "SHADE_CAP_GUARD",
+                "SHADE_DISMISSED",
+            )
+        const val PROTECTED_MAX_ROWS = 2_000
         private val ALLOWED_FIELDS =
             setOf(
+                "active",
                 "attempt",
                 "createdAt",
+                "dismissed",
                 "errorCode",
                 "eventId",
                 "httpStatus",
@@ -154,7 +183,10 @@ class DiagnosticRepository(
                 "listener",
                 "nextAttemptAt",
                 "packageName",
+                "persisted",
                 "queue",
+                "remaining",
+                "sent",
                 "source",
                 "state",
             )

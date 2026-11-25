@@ -1,0 +1,75 @@
+Device evidence — 2026-11-24 shade hygiene (SM-S948U / R3GL605J0AH)
+====================================================================
+
+Metadata only. No notification text and no bearer were captured or printed.
+
+Shade counts (dumpsys notification, NotificationRecord / flags)
+--------------------------------------------------------------
+Before the interim fix (reported by the operator): 49 BNN child alerts + 1 summary
+  -> the OS rejected every new BNN post with:
+     E/NotificationService: Package has already posted or enqueued 50 notifications.
+     Not showing more. package=us.bnn.newsapp
+After the interim `cmd notification snooze` of the 44 oldest: 10 AUTO_CANCEL + 1
+  AUTOGROUP_SUMMARY.
+During this run, BNN refilled to 14 AUTO_CANCEL + 1 summary while the collector was
+  being reinstalled and BNN re-selected.
+After shade hygiene ran (catch-up import + SENT dismissal):
+  10 flags=AUTO_CANCEL
+   1 flags=AUTO_CANCEL|LOCAL_ONLY|GROUP_SUMMARY|AUTOGROUP_SUMMARY
+  i.e. exactly the configured newest 10 plus the group summary. Group summaries are
+  not counted and are never dismissed alone.
+
+Collector state
+---------------
+versionCode=2 / versionName=0.2.0 installed with `adb install -r`.
+Notification Access: com.nfaalerts.collector/.capture.NfaNotificationListenerService
+  is listed in enabled_notification_listeners.
+Selected source: us.bnn.newsapp, bnnMappingConfirmed=true, enabled=true.
+Bearer: present in no_backup/ingest-bearer-v1.json (value never read).
+Cap rejections for us.bnn.newsapp in the current logcat buffer: 0.
+
+Outbox / Room proof (in-process, metadata only)
+-----------------------------------------------
+16 us.bnn.newsapp rows, every one `state=SENT`, `http=202`, with a UUID
+serverIngestId. Examples:
+  path=SHADE state=SENT http=202 ingest=c6065072-ac0a-4f36-abb1-5a9d321bc094
+    capturedAt=1795583729717 sentAt=1795583730866 roomToSentMs=1149
+  path=SHADE state=SENT http=202 ingest=9de0b8ea-abbb-45a5-9a5e-3751377554f8
+    capturedAt=1795583729695 sentAt=1795583729905 roomToSentMs=210
+  path=SHADE state=SENT http=202 ingest=ae0a39b6-3f28-4193-b044-4638a89184c1
+    capturedAt=1795583729672 sentAt=1795583729902 roomToSentMs=230
+  path=SHADE state=SENT http=202 ingest=3f6cb3b5-b819-4f58-9c61-a0cd587c5e99
+    capturedAt=1795583729657 sentAt=1795583730028 roomToSentMs=371
+  path=SHADE state=SENT http=202 ingest=040c03a4-a9b2-421f-9182-a9846dd011bd
+    capturedAt=1795583729643 sentAt=1795583730041 roomToSentMs=398
+Room -> HTTPS 202 is 210-1149 ms, under the 3 s target.
+
+Shade catch-up (requirement 6)
+------------------------------
+`capturePath='SHADE'` rows now exist in production Room. Reconcile imported 5 BNN
+notifications that were still visible but missing from Room (the listener had been
+restarted by the reinstall). Diagnostics also show `CATCH_UP_ALREADY_SAVED` with
+`state=SHADE`, i.e. the 10 still-visible live-captured alerts were correctly skipped.
+Conclusion: 0 SHADE rows before this run was expected behavior (live capture already
+had every visible post); it was not a broken reconcile path.
+
+Shade diagnostics
+-----------------
+  SHADE_DISMISSED details={"dismissed":6,"packageName":"us.bnn.newsapp",
+                          "persisted":0,"sent":6,"state":"DISMISSED"}
+  CAPTURE_DROPPED details={"errorCode":"ALLOWLIST_REJECT",
+                          "packageName":"gptos.intelligence.assistant",
+                          "queue":745,"state":"LIVE"}
+  CAPTURE_DROPPED details={"errorCode":"ALLOWLIST_REJECT",
+                          "packageName":"gptos.intelligence.assistant",
+                          "queue":331,"state":"LIVE"}
+The non-selected flood is aggregated (queue=count, one row per 5 minutes), and the
+protected shade/capture rows are not evicted by it.
+
+Still unverified
+----------------
+- A brand-new live BNN alert (postTime == capture time) has not yet occurred since
+  the reinstall. Room->202 is proven under 3 s; live post->Room->202 awaits the next
+  BNN alert.
+- 24-hour soak with zero cap rejections has not elapsed.
+- Locked-screen overnight idle proof remains open (pre-existing).

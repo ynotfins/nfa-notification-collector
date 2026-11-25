@@ -102,6 +102,37 @@ class NotificationCaptureProcessorTest {
         }
 
     @Test
+    fun `sensitive redaction is stored and no text is invented`() =
+        runBlocking {
+            val writes = mutableListOf<Pair<CapturedNotificationEntity, DeliveryOutboxEntity>>()
+            val base = request()
+            val request =
+                base.copy(
+                    identity =
+                        base.identity.copy(
+                            ranking = RankingSnapshot(lockscreenVisibilityOverride = VISIBILITY_SECRET),
+                        ),
+                )
+            processor(
+                reader = { _, _ ->
+                    AndroidNotificationSnapshot(
+                        envelopeValues = mapOf("visibility" to VISIBILITY_SECRET),
+                        rawTextSelection = RawTextSelection(null, null, emptyMap()),
+                        visibility = VISIBILITY_SECRET,
+                        visibleTextBlank = true,
+                    )
+                },
+                writes = writes,
+            ).process(request)
+
+            val capture = writes.single().first
+            assertNull(capture.rawText)
+            assertTrue(capture.envelopeJson.contains(SENSITIVE_REDACTED))
+            assertFalse(capture.envelopeJson.contains("invented"))
+            assertTrue(capture.envelopeJson.contains("lockscreenVisibilityOverride"))
+        }
+
+    @Test
     fun `delivery kickoff runs only after immutable Room persistence returns`() =
         runBlocking {
             val order = mutableListOf<String>()

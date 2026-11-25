@@ -84,6 +84,45 @@ class DiagnosticRepositoryTest {
         }
 
     @Test
+    fun `capture drops record a reason without notification text or a bearer`() =
+        runBlocking {
+            val store = RecordingDiagnosticStore()
+            val repository = DiagnosticRepository(store, clock = { 9L }, idFactory = { "drop-id" })
+
+            val recorded =
+                repository.record(
+                    "CAPTURE_DROPPED",
+                    mapOf(
+                        "errorCode" to "ALLOWLIST_REJECT",
+                        "packageName" to "com.example.other",
+                        "state" to "LIVE",
+                        "queue" to 1,
+                    ),
+                )
+            val bearer =
+                repository.record(
+                    "CAPTURE_DROPPED",
+                    mapOf("errorCode" to "Bearer sentinel-token"),
+                )
+
+            assertEquals(DiagnosticRecordResult.Recorded, recorded)
+            assertEquals(DiagnosticRecordResult.Rejected("SENSITIVE_DIAGNOSTIC_VALUE"), bearer)
+            assertEquals("CAPTURE_DROPPED", store.rows.single().eventCode)
+            assertTrue(
+                store.rows
+                    .single()
+                    .safeDetailsJson
+                    .contains("ALLOWLIST_REJECT"),
+            )
+            assertFalse(
+                store.rows
+                    .single()
+                    .safeDetailsJson
+                    .contains("sentinel"),
+            )
+        }
+
+    @Test
     fun objectAndArrayValuesAreRejectedRatherThanStringified() =
         runBlocking {
             val store = RecordingDiagnosticStore()
@@ -121,6 +160,8 @@ class DiagnosticRepositoryTest {
         val rows = mutableListOf<DiagnosticEventEntity>()
         var lastCutoff = 0L
         var lastMaxRows = 0
+        var lastProtectedCodes = emptyList<String>()
+        var lastProtectedMaxRows = 0
 
         override suspend fun insert(event: DiagnosticEventEntity) {
             rows += event
@@ -129,9 +170,13 @@ class DiagnosticRepositoryTest {
         override suspend fun prune(
             cutoffEpochMillis: Long,
             maxRows: Int,
+            protectedEventCodes: List<String>,
+            protectedMaxRows: Int,
         ) {
             lastCutoff = cutoffEpochMillis
             lastMaxRows = maxRows
+            lastProtectedCodes = protectedEventCodes
+            lastProtectedMaxRows = protectedMaxRows
         }
     }
 }

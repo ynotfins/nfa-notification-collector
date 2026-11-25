@@ -29,6 +29,8 @@ These are decision anchors. Do not silently swap architecture:
 7. **Secrets stay on the Keystore path** — bearer is UI-entered only; never commit, log, export, print, or ADB-pass secrets.
 8. **No success claim without locked-screen idle proof** — compile/APK/install success is not phone-to-PC acceptance. Require screen-off/locked idle evidence plus ingest `202` before declaring capture reliable.
 9. **No permanent third-party mirror dependency** — MacroDroid may run as a **parallel backup** posting the same schema-v1 body until cutover, but production capture authority remains this collector. Pushbullet/OpenClaw/alertsheets are diagnosis-only and should stay disabled on the primary phone. Never scrape Settings → Notification history (no public API; violates NLS-only).
+10. **Shade hygiene is part of capture** — Android rejects every new post from an app that already holds 50 active notifications. Selected-source notifications are dismissed only after their Room row is `SENT`, the newest `N` (default 10) stay visible, a cap guard at 40 dismisses persisted rows down to `N`, and 45+ after the guard raises a high-priority local alert. Non-selected packages are never touched, and nothing leaves the shade without a Room row. `SHADE_CAP_GUARD`, `SHADE_DISMISSED`, `SHADE_ALERT`, and `CAPTURE_PERSISTED` keep their own diagnostic retention. This is shade maintenance, not polling capture; live `onNotificationPosted` remains the capture path.
+11. **Never run `connectedDebugAndroidTest` against the primary phone** — the AGP/Unified Test Platform driver uninstalls the app under test after the run. On 2026-11-24 that deleted the collector's Room database and Keystore bearer. Use `adb install -r` plus `adb shell am instrument` for device tests, and never uninstall, clear data, or force-stop the collector.
 
 ## Material stop gates
 
@@ -59,6 +61,14 @@ Stop and request operator direction for:
 - Operator screenshots of a dense burst about 7:05–7:23 PM and a 2:37 PM card whose visible text was Big Fire are not in the current `logcat -b events` `notification_enqueue` buffer. Room has no row whose text is Big Fire. No missing-count is claimed for that older window.
 - No in-app BNN scanner was added. That remains a stop gate: Accessibility and notification-history scraping stay forbidden.
 - Platform queue items NP-004 through NP-007 are not started from this note.
+
+## Measured device status (2026-11-24)
+
+- Root cause of the 2026-11-17–21 and 2026-11-24 capture outages: BNN reached Android's 50-active-notification cap. Logcat showed `Package has already posted or enqueued 50 notifications. Not showing more. package=us.bnn.newsapp`; an FCM push reached BNN at 18:16:22 and the OS rejected `notify(0, 1919367, …)` 6 ms later. The collector listener was bound and healthy throughout; its outbox was 100% `SENT`/202.
+- Interim mitigation: the 44 oldest BNN notifications were hidden with `cmd notification snooze` over ADB. Capture resumed immediately; this is manual and refills.
+- Permanent mitigation: shade hygiene (anchor 10) with configurable keep-newest, cap guard, operator alert, and separate diagnostic retention.
+- `capturePath='SHADE'` has never appeared in production Room because every still-visible post was already captured live. That is expected, not a defect; the reconcile path imports only identities missing from Room.
+- Test-runner incident: `connectedDebugAndroidTest` uninstalled the app and deleted its Room/Keystore. Reinstalled with `adb install -r`; Notification Access, bearer, and battery exemption are operator-only restores. See `.agentcore/evidence/shade-hygiene-incident-2026-11-24.txt`.
 
 ## Explicit non-goals
 

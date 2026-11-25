@@ -50,6 +50,10 @@ data class ReliabilityConfig(
     val recentsLocked: Boolean,
 )
 
+data class ShadeConfig(
+    val keepNewestPerPackage: Int,
+)
+
 data class CollectorConfig(
     val configVersion: Int,
     val deviceId: String,
@@ -60,6 +64,7 @@ data class CollectorConfig(
     val retention: RetentionConfig,
     val diagnostics: DiagnosticsConfig,
     val reliability: ReliabilityConfig,
+    val shade: ShadeConfig,
 ) {
     val activeEndpoint: EndpointProfile
         get() = endpointProfiles.getValue(activeEndpointProfile)
@@ -172,6 +177,7 @@ class CollectorConfigCodec {
         val retention = root.getValue("retention").jsonObject
         val diagnostics = root.getValue("diagnostics").jsonObject
         val reliability = root.getValue("reliability").jsonObject
+        val shade = root.getValue("shade").jsonObject
         return CollectorConfigDocument(
             root = root,
             config =
@@ -201,6 +207,10 @@ class CollectorConfigCodec {
                     reliability =
                         ReliabilityConfig(
                             recentsLocked = reliability.getValue("recentsLocked").jsonPrimitive.booleanOrNull == true,
+                        ),
+                    shade =
+                        ShadeConfig(
+                            keepNewestPerPackage = shade.getValue("keepNewestPerPackage").jsonPrimitive.int,
                         ),
                 ),
             migratedFromVersion = migratedFromVersion,
@@ -288,7 +298,7 @@ class CollectorConfigCodec {
             errors += ConfigValidationError("/sources", "TOO_MANY_SOURCES", "At most ten sources are allowed.")
         }
         sources?.let { validateSources(it, errors) }
-        listOf("delivery", "retention", "diagnostics", "reliability").forEach { section ->
+        listOf("delivery", "retention", "diagnostics", "reliability", "shade").forEach { section ->
             if (root[section] !is JsonObject) {
                 errors +=
                     ConfigValidationError("/$section", "OBJECT_REQUIRED", "Configuration section must be an object.")
@@ -319,6 +329,7 @@ class CollectorConfigCodec {
         validatePositiveInt(root, "retention", "maxSentRows", errors)
         validatePositiveInt(root, "diagnostics", "retentionDays", errors)
         validatePositiveInt(root, "diagnostics", "maxRows", errors)
+        validateIntRange(root, "shade", "keepNewestPerPackage", 1..MAX_KEEP_NEWEST_PER_PACKAGE, errors)
         return errors.distinct()
     }
 
@@ -354,6 +365,24 @@ class CollectorConfigCodec {
                     "/$section/$key",
                     "POSITIVE_INTEGER_REQUIRED",
                     "Value must be a positive integer.",
+                )
+        }
+    }
+
+    private fun validateIntRange(
+        root: JsonObject,
+        section: String,
+        key: String,
+        range: IntRange,
+        errors: MutableList<ConfigValidationError>,
+    ) {
+        val value = ((root[section] as? JsonObject)?.get(key) as? JsonPrimitive)?.intOrNull
+        if (value == null || value !in range) {
+            errors +=
+                ConfigValidationError(
+                    "/$section/$key",
+                    "INTEGER_RANGE",
+                    "Value is outside the supported range.",
                 )
         }
     }
@@ -571,6 +600,11 @@ class CollectorConfigCodec {
                 JsonObject(mapOf("recentsLocked" to JsonPrimitive(false))),
                 result["reliability"],
             )
+        result["shade"] =
+            mergeKnownObject(
+                JsonObject(mapOf("keepNewestPerPackage" to JsonPrimitive(DEFAULT_KEEP_NEWEST_PER_PACKAGE))),
+                result["shade"],
+            )
         return JsonObject(result)
     }
 
@@ -645,6 +679,8 @@ class CollectorConfigCodec {
         const val DEFAULT_BASE_URL = "https://chaoscentral.tailb71e7e.ts.net"
         const val DEFAULT_INGEST_PATH = "/v1/ingest/alerts"
         const val MAX_PAYLOAD_BYTES = 1_048_576
+        const val DEFAULT_KEEP_NEWEST_PER_PACKAGE = 10
+        const val MAX_KEEP_NEWEST_PER_PACKAGE = 30
         private const val LEGACY_PROFILE = "legacy"
         private const val MAX_BACKOFF_MS = 21_600_000L
         private val SUPPORTED_THEMES = setOf("primary-light", "secondary-light", "primary-dark", "secondary-dark")

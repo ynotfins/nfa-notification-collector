@@ -115,6 +115,52 @@ class CaptureDatabaseInstrumentedTest {
             assertEquals(2, database.captureReadDao().captureCount())
         }
 
+    @Test
+    fun protectedShadeDiagnosticsSurviveTheNonSelectedFlood() =
+        runBlocking {
+            val dao = database.diagnosticsDao()
+            val base = 1_000_000L
+            repeat(10) { index ->
+                dao.insertFromRepository(
+                    DiagnosticEventEntity("flood-$index", base + index, "CAPTURE_DROPPED", "{}"),
+                )
+            }
+            repeat(5) { index ->
+                dao.insertFromRepository(
+                    DiagnosticEventEntity("shade-$index", base + 100 + index, "SHADE_CAP_GUARD", "{}"),
+                )
+            }
+
+            dao.prune(
+                cutoffEpochMillis = 0,
+                maxRows = 3,
+                protectedEventCodes = listOf("SHADE_CAP_GUARD"),
+                protectedMaxRows = 5,
+            )
+
+            val rows = dao.recent(100)
+            assertEquals(3, rows.count { it.eventCode == "CAPTURE_DROPPED" })
+            assertEquals(5, rows.count { it.eventCode == "SHADE_CAP_GUARD" })
+        }
+
+    @Test
+    fun protectedShadeDiagnosticsOutliveTheAgeCutoff() =
+        runBlocking {
+            val dao = database.diagnosticsDao()
+            val base = 1_000_000L
+            dao.insertFromRepository(DiagnosticEventEntity("old-flood", base, "CAPTURE_DROPPED", "{}"))
+            dao.insertFromRepository(DiagnosticEventEntity("old-shade", base + 1, "SHADE_CAP_GUARD", "{}"))
+
+            dao.prune(
+                cutoffEpochMillis = base + 10,
+                maxRows = 100,
+                protectedEventCodes = listOf("SHADE_CAP_GUARD"),
+                protectedMaxRows = 100,
+            )
+
+            assertEquals(listOf("old-shade"), dao.recent(100).map { it.diagnosticId })
+        }
+
     private fun capture(
         eventId: String,
         sourceId: String,

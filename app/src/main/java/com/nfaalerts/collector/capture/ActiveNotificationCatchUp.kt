@@ -12,6 +12,7 @@ class ActiveNotificationCatchUp(
     private val alreadyCaptured: suspend (packageName: String, key: String, postTimeEpochMillis: Long) -> Boolean,
     private val onMissing: (LightweightPostedNotification) -> Boolean,
     private val diagnostics: CatchUpDiagnostics = NoOpCatchUpDiagnostics,
+    private val dropLedger: CaptureDropLedger = NoOpCaptureDropLedger,
 ) {
     suspend fun reconcile(notifications: List<LightweightPostedNotification>): CatchUpResult {
         var examined = 0
@@ -22,6 +23,11 @@ class ActiveNotificationCatchUp(
             examined++
             if (alreadyCaptured(notification.packageName, notification.key, notification.postTimeEpochMillis)) {
                 skippedExisting++
+                dropLedger.onDropped(
+                    CaptureDropReason.CATCH_UP_ALREADY_SAVED,
+                    notification.packageName,
+                    notification.capturePath,
+                )
                 continue
             }
             val accepted = onMissing(notification)

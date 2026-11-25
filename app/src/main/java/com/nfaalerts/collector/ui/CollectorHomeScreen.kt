@@ -293,6 +293,41 @@ private fun StatusScreen(
         }
         item {
             HomeTile(
+                title = "Shade hygiene",
+                summary =
+                    when {
+                        snapshot.shadeAlertPackages.isNotEmpty() -> {
+                            "At risk: ${snapshot.shadeAlertPackages.joinToString(", ")}"
+                        }
+
+                        snapshot.shadeLargestCount > 0 -> {
+                            "${snapshot.shadeLargestCount} active in the largest selected app · keeping ${snapshot.shadeKeepNewest}"
+                        }
+
+                        else -> {
+                            "No selected-source pressure"
+                        }
+                    },
+                tip =
+                    "Android rejects every new post from an app that already holds 50 active notifications. " +
+                        "Delivered notifications are dismissed only after their Room row is SENT; the newest " +
+                        "${snapshot.shadeKeepNewest} per selected app stay visible. The guard acts at 40 and " +
+                        "alerts at 45.",
+                containerColor =
+                    if (snapshot.shadeAlertPackages.isNotEmpty()) colors.warningContainer else colors.successContainer,
+                contentColor =
+                    if (snapshot.shadeAlertPackages.isNotEmpty()) {
+                        colors.onWarningContainer
+                    } else {
+                        colors.onSuccessContainer
+                    },
+                actionLabel = "Open capture health",
+                onAction = { openDestination(CollectorDestination.Delivery) },
+                modifier = Modifier.testTag("shade-hygiene-tile"),
+            )
+        }
+        item {
+            HomeTile(
                 title = "Send now",
                 summary = flushMessage ?: "Drain sendable rows only",
                 tip =
@@ -580,6 +615,55 @@ private fun DeliveryScreen(
         item { Text("Safe diagnostics", modifier = Modifier.semantics { heading() }) }
         item {
             RgdsCard(
+                title = "Phone standing",
+                subtitle = "What this phone can prove from inside the app",
+                badgeLabel = "GRANT",
+            ) {
+                Text("Notification access: ${snapshot.notificationAccessLabel}")
+                Text("Battery optimization: ${snapshot.batteryState}")
+                Text("Listener connected: ${if (snapshot.listenerConnected) "Yes" else "No"}")
+                Text(
+                    "Samsung Never sleeping apps cannot be read by the app. " +
+                        "Settings, Battery and device care, Battery, Background usage limits, Never sleeping apps. " +
+                        "Add NFA Notification Collector, MacroDroid, and BNN.",
+                )
+                Text(
+                    "PC check: scripts/device/verify-reliability-grants.ps1 " +
+                        "(idle whitelist and background app-ops).",
+                )
+            }
+        }
+        item {
+            RgdsCard(
+                title = "Capture health",
+                subtitle = "Listener, queue, and recorded skips since this app process started",
+                badgeLabel = "LIVE",
+            ) {
+                Text("Listener: ${if (snapshot.listenerConnected) "Connected" else "Disconnected"}")
+                Text("Last saved notification: ${formatCaptureTime(snapshot.lastCapture)}")
+                Text(
+                    "Queue depth: ${snapshot.queueCount} waiting to send, " +
+                        "${snapshot.captureBufferDepth} held until startup finishes, " +
+                        "${snapshot.captureWorkers} save in progress",
+                )
+                Text("Not in the selected apps: ${snapshot.allowlistRejectCount}")
+                Text("Group summaries skipped: ${snapshot.autogroupSkipCount}")
+                Text("Notification copy failed: ${snapshot.copyCloneFailureCount}")
+                Text("Startup buffer full: ${snapshot.bufferOverflowCount}")
+                Text("Catch-up already saved: ${snapshot.catchUpSkipCount}")
+                Text(
+                    "Shade dismissals: ${snapshot.shadeDismissedCount} · cap guards: " +
+                        "${snapshot.shadeCapGuardCount} · largest selected app: ${snapshot.shadeLargestCount} " +
+                        "(keeping newest ${snapshot.shadeKeepNewest})",
+                )
+                if (snapshot.shadeAlertPackages.isNotEmpty()) {
+                    Text("At risk after the guard ran: ${snapshot.shadeAlertPackages.joinToString(", ")}")
+                }
+                Text("These counts reset when the app process restarts. The log below keeps the newest reasons.")
+            }
+        }
+        item {
+            RgdsCard(
                 title = "Diagnostics export",
                 subtitle = "Secret-free health and retry evidence",
                 badgeLabel = "LOG",
@@ -650,6 +734,14 @@ private fun DeliveryScreen(
             confirmButton = { TextButton(onClick = { envelope = null }) { Text("Close") } },
         )
     }
+}
+
+private fun formatCaptureTime(value: String): String {
+    val epoch = value.toLongOrNull() ?: return if (value == "Unknown") "None yet" else value
+    return java.time.format.DateTimeFormatter
+        .ofPattern("yyyy-MM-dd HH:mm:ss")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(java.time.Instant.ofEpochMilli(epoch))
 }
 
 private data class DeliveryPresentation(
@@ -1078,6 +1170,18 @@ private fun SettingsScreen(
                     options = countOptions(500, 1_000, 2_000, 5_000, 20_000, 50_000),
                     tip = "Soak-ready default is 50,000 diagnostics rows. Never removes captures/outbox.",
                     onSelected = { draft = current.copy(diagnosticsMaxRows = it) },
+                )
+            }
+            item {
+                SettingsDropdown(
+                    label = "Notifications kept in shade",
+                    currentValue = current.keepNewestPerPackage,
+                    options = countOptions(5, 10, 15, 20, 30),
+                    tip =
+                        "Newest alerts kept visible per selected app. Older delivered notifications are " +
+                            "dismissed after their Room row is SENT. The cap guard keeps the app under Android's " +
+                            "50-notification limit.",
+                    onSelected = { draft = current.copy(keepNewestPerPackage = it) },
                 )
             }
             item {

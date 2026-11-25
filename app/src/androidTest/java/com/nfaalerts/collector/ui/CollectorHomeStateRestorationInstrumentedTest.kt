@@ -3,11 +3,14 @@ package com.nfaalerts.collector.ui
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -30,6 +33,7 @@ class CollectorHomeStateRestorationInstrumentedTest {
 
         composeRule.onNodeWithContentDescription("Open Settings").performClick()
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Enter token"))
         composeRule.onNodeWithText("Enter token").performClick()
         composeRule.onNodeWithText("Bearer token").performTextInput("transient-secret")
         composeRule.runOnIdle {
@@ -40,6 +44,7 @@ class CollectorHomeStateRestorationInstrumentedTest {
 
         restorationTester.emulateSavedInstanceStateRestore()
 
+        composeRule.onNodeWithTag("settings-list").performScrollToNode(hasText("Connection settings"))
         composeRule.onNodeWithText("Connection settings").assertIsDisplayed()
         composeRule.onNodeWithText("Enter bearer token").assertDoesNotExist()
         composeRule.onNodeWithText("transient-secret").assertDoesNotExist()

@@ -24,6 +24,43 @@ abstract class CaptureWriteDao {
         insertCapturedRow(capture)
         insertInitialOutboxRow(outbox)
     }
+
+    @Query(
+        """
+        DELETE FROM delivery_outbox WHERE eventId IN (
+          SELECT eventId FROM captured_notifications
+          WHERE packageName = :packageName AND notificationTag LIKE :tagPrefix || '%'
+        )
+        """,
+    )
+    protected abstract suspend fun deleteOutboxForTag(
+        packageName: String,
+        tagPrefix: String,
+    ): Int
+
+    @Query(
+        """
+        DELETE FROM captured_notifications
+        WHERE packageName = :packageName AND notificationTag LIKE :tagPrefix || '%'
+        """,
+    )
+    protected abstract suspend fun deleteCapturesForTag(
+        packageName: String,
+        tagPrefix: String,
+    ): Int
+
+    /**
+     * Test-only cleanup for notifications an instrumentation run created. Never
+     * called by production code paths.
+     */
+    @Transaction
+    open suspend fun deleteCapturesByTagPrefix(
+        packageName: String,
+        tagPrefix: String,
+    ): Int {
+        deleteOutboxForTag(packageName, tagPrefix)
+        return deleteCapturesForTag(packageName, tagPrefix)
+    }
 }
 
 @Dao
@@ -55,8 +92,33 @@ interface CaptureReadDao {
 
     @Query(
         """
+        SELECT c.notificationKey AS notificationKey, c.postTimeEpochMillis AS postTimeEpochMillis,
+               o.state AS state
+        FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
+        WHERE c.packageName = :packageName AND c.notificationKey IN (:keys)
+        """,
+    )
+    suspend fun deliveryStatesForPackage(
+        packageName: String,
+        keys: List<String>,
+    ): List<CaptureDeliveryStateRow>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM captured_notifications
+        WHERE packageName = :packageName AND notificationTag LIKE :tagPrefix || '%'
+        """,
+    )
+    suspend fun captureCountByTagPrefix(
+        packageName: String,
+        tagPrefix: String,
+    ): Int
+
+    @Query(
+        """
         SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
-               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId,
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId, o.sentAtEpochMillis,
+               c.postTimeEpochMillis, c.capturePath,
                CASE WHEN o.state = 'QUARANTINED' THEN substr(coalesce(c.rawText, ''), 1, 160) ELSE NULL END AS quarantinePreview
         FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
         ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
@@ -67,7 +129,8 @@ interface CaptureReadDao {
     @Query(
         """
         SELECT c.eventId, c.packageName, c.sourceId, c.capturedAtEpochMillis, o.state, o.attemptCount,
-               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId,
+               o.lastHttpStatus, o.lastErrorCode, o.serverIngestId, o.sentAtEpochMillis,
+               c.postTimeEpochMillis, c.capturePath,
                CASE WHEN o.state = 'QUARANTINED' THEN substr(coalesce(c.rawText, ''), 1, 160) ELSE NULL END AS quarantinePreview
         FROM captured_notifications c JOIN delivery_outbox o ON c.eventId = o.eventId
         ORDER BY c.capturedAtEpochMillis DESC, c.eventId DESC LIMIT :limit
@@ -126,7 +189,16 @@ data class DeliveryInspection(
     val lastHttpStatus: Int?,
     val lastErrorCode: String?,
     val serverIngestId: String?,
+    val sentAtEpochMillis: Long? = null,
+    val postTimeEpochMillis: Long = 0,
+    val capturePath: String = "",
     val quarantinePreview: String? = null,
+)
+
+data class CaptureDeliveryStateRow(
+    val notificationKey: String,
+    val postTimeEpochMillis: Long,
+    val state: DeliveryState,
 )
 
 @Dao
@@ -408,19 +480,47 @@ internal abstract class DiagnosticsDao {
 
     internal open suspend fun insertFromRepository(event: DiagnosticEventEntity) = insertRow(event)
 
-    @Query("DELETE FROM diagnostic_events WHERE createdAtEpochMillis < :cutoffEpochMillis")
-    protected abstract suspend fun deleteOlderThan(cutoffEpochMillis: Long): Int
+    @Query(
+        """
+        DELETE FROM diagnostic_events
+        WHERE createdAtEpochMillis < :cutoffEpochMillis
+          AND eventCode NOT IN (:protectedEventCodes)
+        """,
+    )
+    protected abstract suspend fun deleteOlderThan(
+        cutoffEpochMillis: Long,
+        protectedEventCodes: List<String>,
+    ): Int
 
     @Query(
         """
         DELETE FROM diagnostic_events WHERE diagnosticId IN (
           SELECT diagnosticId FROM diagnostic_events
+          WHERE eventCode NOT IN (:protectedEventCodes)
           ORDER BY createdAtEpochMillis DESC, diagnosticId DESC
           LIMIT -1 OFFSET :maxRows
         )
         """,
     )
-    protected abstract suspend fun deleteOverflow(maxRows: Int): Int
+    protected abstract suspend fun deleteOverflow(
+        maxRows: Int,
+        protectedEventCodes: List<String>,
+    ): Int
+
+    @Query(
+        """
+        DELETE FROM diagnostic_events WHERE diagnosticId IN (
+          SELECT diagnosticId FROM diagnostic_events
+          WHERE eventCode IN (:protectedEventCodes)
+          ORDER BY createdAtEpochMillis DESC, diagnosticId DESC
+          LIMIT -1 OFFSET :protectedMaxRows
+        )
+        """,
+    )
+    protected abstract suspend fun deleteProtectedOverflow(
+        protectedMaxRows: Int,
+        protectedEventCodes: List<String>,
+    ): Int
 
     @Query("SELECT * FROM diagnostic_events ORDER BY createdAtEpochMillis DESC, diagnosticId DESC LIMIT :limit")
     abstract suspend fun recent(limit: Int): List<DiagnosticEventEntity>
@@ -432,5 +532,10 @@ internal abstract class DiagnosticsDao {
     open suspend fun prune(
         cutoffEpochMillis: Long,
         maxRows: Int,
-    ): Int = deleteOlderThan(cutoffEpochMillis) + deleteOverflow(maxRows)
+        protectedEventCodes: List<String>,
+        protectedMaxRows: Int,
+    ): Int =
+        deleteOlderThan(cutoffEpochMillis, protectedEventCodes) +
+            deleteOverflow(maxRows, protectedEventCodes) +
+            deleteProtectedOverflow(protectedMaxRows, protectedEventCodes)
 }

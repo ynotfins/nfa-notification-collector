@@ -110,6 +110,7 @@ class DeliveryCoordinator(
     private val clock: () -> Long = System::currentTimeMillis,
     private val retryPolicy: RetryPolicy = RetryPolicy(),
     private val paceLimiter: DrainPaceLimiter = DrainPaceLimiter(sleeper = {}),
+    private val onDelivered: (eventId: String) -> Unit = {},
 ) {
     suspend fun drainOne(owner: String): Boolean {
         var claim: DeliveryOutboxEntity? = null
@@ -238,6 +239,7 @@ class DeliveryCoordinator(
         when (result) {
             is IngestResult.Sent -> {
                 store.markSent(claim.eventId, owner, completionTime(claimStartedAt), result)
+                runCatching { onDelivered(claim.eventId) }
             }
 
             is IngestResult.RetryWait -> {

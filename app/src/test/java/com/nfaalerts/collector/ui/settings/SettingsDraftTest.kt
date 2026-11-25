@@ -58,12 +58,14 @@ class SettingsDraftTest {
                     maxSentRows = "999",
                     diagnosticsDays = "7",
                     diagnosticsMaxRows = "500",
+                    keepNewestPerPackage = "15",
                 )
 
         val decoded = draft.decode(codec) as ConfigDecodeResult.Valid
 
         assertEquals("backup", decoded.document.config.activeEndpointProfile)
         assertEquals("device-2", decoded.document.config.deviceId)
+        assertEquals(15, decoded.document.config.shade.keepNewestPerPackage)
         assertEquals(
             "preserve",
             decoded.document.root

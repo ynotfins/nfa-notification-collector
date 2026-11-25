@@ -18,17 +18,30 @@ The implementation must define a versioned `collector-config.json` with at least
   "sources": [],
   "delivery": {
     "connectTimeoutMs": 15000,
-    "maxAttempts": 12,
-    "initialBackoffMs": 5000,
-    "maxBackoffMs": 3600000
+    "readTimeoutMs": 30000,
+    "initialBackoffMs": 30000,
+    "maxBackoffMs": 21600000
+  },
+  "retention": {
+    "sentDays": 180,
+    "maxSentRows": 100000
   },
   "diagnostics": {
-    "retentionDays": 14
+    "retentionDays": 90,
+    "maxRows": 50000
+  },
+  "reliability": {
+    "recentsLocked": false
+  },
+  "shade": {
+    "keepNewestPerPackage": 10
   }
 }
 ```
 
 Values are a design baseline, not dependency/source-server authorization. The Plan-mode spec defines exact validation ranges and migrations.
+
+`shade.keepNewestPerPackage` (1–30, default 10) is how many of the newest notifications per selected package stay visible. Older notifications are dismissed only after their Room row is `SENT`; a cap guard at 40 dismisses persisted rows down to this number. See `docs/PRODUCT_REQUIREMENTS.md` §Shade hygiene.
 
 ## Atomic last-known-good behavior
 

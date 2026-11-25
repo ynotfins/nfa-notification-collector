@@ -168,6 +168,20 @@ class AppContainerUiRepository internal constructor(
                 canonicalConfigRevision = config?.revisionHash.orEmpty(),
                 bearerSavedAtEpochMillis = core.bearer?.savedAtEpochMillis,
                 bearerRevisionOk = core.bearer?.present == true && core.bearer.revisionFingerprint != null,
+                captureBufferDepth = core.listener.initializationBufferDepth,
+                captureWorkers = core.listener.activeWorkers,
+                allowlistRejectCount = core.listener.allowlistRejectCount,
+                autogroupSkipCount = core.listener.autogroupSummarySkipCount,
+                copyCloneFailureCount = core.listener.copyCloneFailureCount,
+                bufferOverflowCount = core.listener.initializationOverflowCount,
+                catchUpSkipCount = core.listener.catchUpSkippedExistingCount,
+                shadeDismissedCount = core.listener.shadeDismissedCount,
+                shadeCapGuardCount = core.listener.shadeCapGuardCount,
+                shadeAlertPackages = core.listener.shadeAlertPackages,
+                shadeLargestCount =
+                    core.listener.shadeActiveCounts.values
+                        .maxOrNull() ?: 0,
+                shadeKeepNewest = document.config.shade.keepNewestPerPackage,
                 liveVerificationFingerprint = currentKey,
             )
         }.stateIn(

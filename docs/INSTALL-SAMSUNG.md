@@ -3,7 +3,7 @@
 Measured device truth (2026-10-01, serial `R3GL605J0AH`):
 
 - Model: SM-S948U (Galaxy S26 Ultra), Android 16 / One UI
-- Package installed: `com.nfaalerts.collector` versionName `0.1.0`
+- Package installed: `com.nfaalerts.collector` versionName `0.2.0` (versionCode 2)
 - Debug APK baseline: `artifacts/NFA-Notification-Collector.apk`
 - BNN package discovered on device: `us.bnn.newsapp`
 - Notification Access is granted for the collector listener
@@ -27,6 +27,44 @@ Use only the SDK-owned ADB for one acceptance run:
 Record authorization, model, product, Android release/API, security patch and installed package version. If no/unauthorized device is present, stop only device acceptance; do not claim installation.
 
 Never pass the ingest bearer in ADB commands, intents, shell history or logcat filters.
+
+Never run `./gradlew connectedDebugAndroidTest` against this phone: the AGP/UTP
+driver uninstalls the app under test after the run and deletes its Room database and
+Keystore bearer. Install with `adb install -r` and run device tests with
+`adb shell am instrument -w -r com.nfaalerts.collector.test/androidx.test.runner.AndroidJUnitRunner`.
+Never uninstall, clear data, or force-stop the collector.
+
+## PC scripts (no root)
+
+From this repo, with the phone connected:
+
+```powershell
+pwsh -File scripts/device/apply-reliability-grants.ps1
+pwsh -File scripts/device/verify-reliability-grants.ps1
+```
+
+The apply script whitelists device idle, marks the app active, and allows background app-ops for the collector, BNN, and MacroDroid. It does not turn other listeners off and it never carries the ingest bearer. The verify script prints whitelist, standby, app-ops, and whether Notification Access lists the collector.
+
+Samsung Never sleeping apps is still a phone Settings step. The scripts cannot set it.
+
+## Soak oracle (manual, gitignored output)
+
+Notification History stays a manual second check. These scripts only compare the phone's notification event log with saved package, key or tag, and post time. They do not print notification text.
+
+```powershell
+pwsh -File scripts/device/capture-notification-events.ps1 -DurationSeconds 900
+pwsh -File scripts/device/export-room-identities.ps1
+pwsh -File scripts/device/compare-notification-oracle.ps1
+```
+
+Output stays in `docs/evidence/soak-oracle/`, which is gitignored. A locked-screen run is still required before anyone claims the app never misses.
+
+## What a non-root app cannot get
+
+- Reading Settings → Notification history
+- Unredacted sensitive notifications that Android only gives to system apps
+- A guaranteed callback for every History row (the October 1 shared miss)
+- Direct control of Samsung Never sleeping / Deep sleeping lists (Settings only)
 
 ## Operator setup after installation
 

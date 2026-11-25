@@ -222,7 +222,7 @@ class ConfigAndRepositoryInstrumentedTest {
                         conversions.incrementAndGet()
                         info.loadIcon(context.packageManager).toBitmap(16, 16).asImageBitmap()
                     },
-                    maximumCachedIcons = 512,
+                    maximumCachedIcons = 4_096,
                 )
 
             repository.installedApps()
@@ -230,7 +230,7 @@ class ConfigAndRepositoryInstrumentedTest {
             repository.installedApps()
 
             assertEquals(afterFirst, conversions.get())
-            assertTrue(repository.cachedIconCount in 1..512)
+            assertTrue(repository.cachedIconCount in 1..4_096)
         }
 
     @Test

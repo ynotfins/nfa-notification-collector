@@ -1,0 +1,62 @@
+Verification — 2026-11-24 shade hygiene
+========================================
+
+Environment
+-----------
+JDK 17 (JAVA_HOME), AGP 9.2.1, Kotlin 2.3.10, compileSdk 36, minSdk 26.
+Device: SM-S948U / R3GL605J0AH (Android 16 / API 36).
+
+JVM / unit
+----------
+./gradlew ktlintCheck testDebugUnitTest lintDebug assembleDebug
+  BUILD SUCCESSFUL
+  ShadeHygieneTest: 12 tests, 0 failures
+  CollectorConfigCodecTest: 18 tests, 0 failures (includes shade bounds/defaults)
+  CaptureReliabilityTest: 9 tests, 0 failures (includes 50 ms stalled-write timeout)
+  DiagnosticRepositoryTest: 6 tests, 0 failures
+  All other unit suites: 0 failures
+
+Lint
+----
+lintDebug: 0 errors, 0 warnings. Four pre-existing API/wakelock lint errors in the
+adopted phase3 code were fixed with version guards and a documented suppression.
+
+Instrumentation (device)
+------------------------
+The gate command `connectedDebugAndroidTest` was NOT used on this phone: the
+AGP/UTP driver uninstalls the app under test. It was replaced with:
+
+  adb install -r app/build/outputs/apk/debug/app-debug.apk
+  adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+  adb shell am instrument -w -r com.nfaalerts.collector.test/androidx.test.runner.AndroidJUnitRunner
+
+Result: OK (78 tests), 0 failures, ~64 s.
+Includes:
+  ShadeHygieneInstrumentedTest.sixtySelectedPostsStayUnderTheOsCapAndAllLandInRoom
+    - 60 selected-source posts
+    - all 60 present in Room
+    - max observed shade count <= 40 (cap threshold; N=10 + margin 30)
+    - no OS rejection (a rejected post would be missing from Room)
+  CaptureDatabaseInstrumentedTest.protectedShadeDiagnosticsSurviveTheNonSelectedFlood
+  CaptureDatabaseInstrumentedTest.protectedShadeDiagnosticsOutliveTheAgeCutoff
+
+Dependency repair required for API 36
+-------------------------------------
+Compose UI testing pulled androidx.test.espresso:espresso-core:3.5.0 transitively.
+Espresso 3.5.0 reflects `InputManager.getInstance`, removed in Android 16, so every
+Compose test failed before its first line. Added explicit espresso-core 3.7.0
+(the documented fix). All 78 tests then ran.
+
+Test-drift repairs (test-only, no product behavior change)
+----------------------------------------------------------
+- token tests scroll the settings list to the token button before clicking;
+- delivery flush uses the current `flush-now` tag and current message text;
+- diagnostics export row uses a unique id and a future timestamp so live rows do
+  not displace it;
+- installed-app icon cache bound raised from 512 to 4096 for a device with 859 apps.
+
+Known non-blocking artifact
+---------------------------
+`productionDiagnosticsExportWritesSafeJsonDocument` inserts test diagnostic rows
+into the real app database. They are metadata-only and harmless; the test now uses
+a unique id per run.
