@@ -1,6 +1,7 @@
 # Handoff — shade hygiene for Android's 50-notification cap (2026-11-24)
 
 **Branch:** `goal/shade-hygiene` (based on the previously unmerged `goal/phase3-reliability-standing` at `86c871c`)
+**PR:** https://github.com/ynotfins/nfa-notification-collector/pull/8
 **APK:** `app/build/outputs/apk/debug/app-debug.apk`
 **SHA-256:** `60f5b304cffb454668d19da124f172a8a20fb8f8773224d80b83a873d6b3a7af`
 **Version:** 0.2.0 (versionCode 2)
