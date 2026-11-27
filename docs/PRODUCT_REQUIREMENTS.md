@@ -110,7 +110,8 @@ One unsupported value must not discard the rest of the extras bundle. The local 
 - Pause on `401` until configuration changes.
 - Quarantine `400`, `413`, and `415`; never delete the local original.
 - Recover in-flight state after process death/reboot and schedule due work reliably.
-- Bound sent/history/diagnostic retention while never deleting pending work silently.
+- Bound sent/history/diagnostic retention while never deleting pending work silently. Exact policy,
+  batching, pressure release, and backpressure: `docs/RETENTION-AND-STORAGE.md`.
 
 ### Shade hygiene (Android's 50-notification cap)
 

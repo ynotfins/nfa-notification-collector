@@ -5,7 +5,9 @@ import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Transaction
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.yield
 
 @Dao
 abstract class CaptureWriteDao {
@@ -73,6 +75,9 @@ interface CaptureReadDao {
 
     @Query("SELECT COUNT(*) FROM captured_notifications")
     suspend fun captureCount(): Int
+
+    @Query("SELECT COUNT(*) FROM delivery_outbox WHERE state != 'SENT'")
+    suspend fun unsentCount(): Int
 
     @Query(
         """
@@ -411,65 +416,169 @@ data class RetentionCandidate(
     val serverIngestId: String?,
 )
 
+data class RetentionBatchResult(
+    val capturesDeleted: Int,
+    val outboxRowsDeleted: Int,
+)
+
 @Dao
 abstract class RetentionDao {
+    @Query("SELECT COUNT(*) FROM delivery_outbox WHERE state = 'SENT'")
+    abstract suspend fun sentRowCount(): Int
+
     @Query(
         """
         SELECT c.eventId, c.envelopeSha256, o.serverIngestId
         FROM captured_notifications c
         JOIN delivery_outbox o ON o.eventId = c.eventId
         WHERE o.state = 'SENT'
-          AND (
-            COALESCE(o.sentAtEpochMillis, o.updatedAtEpochMillis) < :cutoffEpochMillis
-            OR o.eventId IN (
-              SELECT eventId FROM delivery_outbox
-              WHERE state = 'SENT'
-              ORDER BY COALESCE(sentAtEpochMillis, updatedAtEpochMillis) DESC, eventId DESC
-              LIMIT -1 OFFSET :maxSentRows
-            )
-          )
+          AND COALESCE(o.sentAtEpochMillis, o.updatedAtEpochMillis) < :cutoffEpochMillis
         ORDER BY COALESCE(o.sentAtEpochMillis, o.updatedAtEpochMillis), o.eventId
+        LIMIT :limit
         """,
     )
-    protected abstract suspend fun candidates(
+    protected abstract suspend fun expiredCandidates(
         cutoffEpochMillis: Long,
-        maxSentRows: Int,
+        limit: Int,
     ): List<RetentionCandidate>
 
+    @Query(
+        """
+        SELECT c.eventId, c.envelopeSha256, o.serverIngestId
+        FROM captured_notifications c
+        JOIN delivery_outbox o ON o.eventId = c.eventId
+        WHERE o.state = 'SENT'
+        ORDER BY COALESCE(o.sentAtEpochMillis, o.updatedAtEpochMillis), o.eventId
+        LIMIT :limit
+        """,
+    )
+    protected abstract suspend fun oldestSentCandidates(limit: Int): List<RetentionCandidate>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    protected abstract suspend fun insertTombstone(tombstone: CaptureRetentionTombstoneEntity): Long
+    protected abstract suspend fun insertTombstones(tombstones: List<CaptureRetentionTombstoneEntity>): List<Long>
 
-    @Query("DELETE FROM delivery_outbox WHERE eventId = :eventId AND state = 'SENT'")
-    protected abstract suspend fun deleteSentOutbox(eventId: String): Int
+    @Query("DELETE FROM delivery_outbox WHERE state = 'SENT' AND eventId IN (:eventIds)")
+    protected abstract suspend fun deleteSentOutboxBatch(eventIds: List<String>): Int
 
-    @Query("DELETE FROM captured_notifications WHERE eventId = :eventId")
-    protected abstract suspend fun deleteCapture(eventId: String): Int
+    @Query(
+        """
+        DELETE FROM captured_notifications
+        WHERE eventId IN (:eventIds)
+          AND NOT EXISTS (SELECT 1 FROM delivery_outbox WHERE delivery_outbox.eventId = captured_notifications.eventId)
+        """,
+    )
+    protected abstract suspend fun deleteOrphanCaptures(eventIds: List<String>): Int
+
+    @Query("SELECT eventId FROM delivery_outbox WHERE eventId IN (:eventIds)")
+    protected abstract suspend fun remainingOutboxIds(eventIds: List<String>): List<String>
 
     @Query("SELECT * FROM capture_retention_tombstones WHERE eventId = :eventId")
     abstract suspend fun tombstone(eventId: String): CaptureRetentionTombstoneEntity?
 
     @Transaction
+    protected open suspend fun deleteBatch(
+        candidates: List<RetentionCandidate>,
+        nowEpochMillis: Long,
+        reason: String,
+    ): RetentionBatchResult {
+        if (candidates.isEmpty()) return RetentionBatchResult(0, 0)
+        val eventIds = candidates.map(RetentionCandidate::eventId)
+        val outboxRowsDeleted = deleteSentOutboxBatch(eventIds)
+        val capturesDeleted = deleteOrphanCaptures(eventIds)
+        val remaining = remainingOutboxIds(eventIds).toSet()
+        val tombstones =
+            candidates
+                .filter { it.eventId !in remaining }
+                .map { candidate ->
+                    CaptureRetentionTombstoneEntity(
+                        eventId = candidate.eventId,
+                        envelopeSha256 = candidate.envelopeSha256,
+                        serverIngestId = candidate.serverIngestId,
+                        retainedAtEpochMillis = nowEpochMillis,
+                        reason = reason,
+                    )
+                }
+        if (tombstones.isNotEmpty()) insertTombstones(tombstones)
+        return RetentionBatchResult(capturesDeleted, outboxRowsDeleted)
+    }
+
+    /**
+     * Deletes at most [batchSize] rows per transaction so capture writes can interleave between
+     * batches. Never touches rows that are not SENT.
+     */
+    open suspend fun pruneSentBatched(
+        cutoffEpochMillis: Long,
+        maxSentRows: Int,
+        nowEpochMillis: Long,
+        batchSize: Int = DEFAULT_PURGE_BATCH_SIZE,
+        onBatch: (Int) -> Unit = {},
+    ): Int {
+        require(batchSize > 0) { "Purge batch size must be positive." }
+        var capturesDeleted = 0
+        while (true) {
+            val batch = expiredCandidates(cutoffEpochMillis, batchSize)
+            if (batch.isEmpty()) break
+            val result = deleteBatch(batch, nowEpochMillis, REASON_SENT_RETENTION)
+            capturesDeleted += result.capturesDeleted
+            onBatch(result.outboxRowsDeleted)
+            if (result.outboxRowsDeleted == 0) break
+            yield()
+            delay(PURGE_BATCH_PAUSE_MS)
+        }
+        var sent = sentRowCount()
+        while (sent > maxSentRows) {
+            val limit = minOf(batchSize, sent - maxSentRows)
+            val batch = oldestSentCandidates(limit)
+            if (batch.isEmpty()) break
+            val result = deleteBatch(batch, nowEpochMillis, REASON_SENT_RETENTION)
+            capturesDeleted += result.capturesDeleted
+            onBatch(result.outboxRowsDeleted)
+            if (result.outboxRowsDeleted == 0) break
+            sent = sentRowCount()
+        }
+        return capturesDeleted
+    }
+
+    /**
+     * Deletes the oldest SENT rows until at most [keepRows] SENT rows remain. Used for storage
+     * pressure release; unsent rows are never candidates.
+     */
+    open suspend fun pruneOldestSent(
+        keepRows: Int,
+        nowEpochMillis: Long,
+        reason: String = REASON_STORAGE_PRESSURE,
+        batchSize: Int = DEFAULT_PURGE_BATCH_SIZE,
+        onBatch: (Int) -> Unit = {},
+    ): Int {
+        require(batchSize > 0) { "Purge batch size must be positive." }
+        var capturesDeleted = 0
+        var sent = sentRowCount()
+        while (sent > keepRows) {
+            val limit = minOf(batchSize, sent - keepRows)
+            val batch = oldestSentCandidates(limit)
+            if (batch.isEmpty()) break
+            val result = deleteBatch(batch, nowEpochMillis, reason)
+            capturesDeleted += result.capturesDeleted
+            onBatch(result.outboxRowsDeleted)
+            if (result.outboxRowsDeleted == 0) break
+            yield()
+            delay(PURGE_BATCH_PAUSE_MS)
+            sent = sentRowCount()
+        }
+        return capturesDeleted
+    }
+
     open suspend fun pruneSent(
         cutoffEpochMillis: Long,
         maxSentRows: Int,
         nowEpochMillis: Long,
-    ): Int {
-        var deleted = 0
-        candidates(cutoffEpochMillis, maxSentRows).forEach { candidate ->
-            insertTombstone(
-                CaptureRetentionTombstoneEntity(
-                    eventId = candidate.eventId,
-                    envelopeSha256 = candidate.envelopeSha256,
-                    serverIngestId = candidate.serverIngestId,
-                    retainedAtEpochMillis = nowEpochMillis,
-                    reason = "SENT_RETENTION",
-                ),
-            )
-            if (deleteSentOutbox(candidate.eventId) == 1) {
-                deleted += deleteCapture(candidate.eventId)
-            }
-        }
-        return deleted
+    ): Int = pruneSentBatched(cutoffEpochMillis, maxSentRows, nowEpochMillis)
+
+    companion object {
+        const val DEFAULT_PURGE_BATCH_SIZE = 100
+        const val PURGE_BATCH_PAUSE_MS = 5L
+        const val REASON_SENT_RETENTION = "SENT_RETENTION"
+        const val REASON_STORAGE_PRESSURE = "STORAGE_PRESSURE"
     }
 }
 
@@ -522,6 +631,9 @@ internal abstract class DiagnosticsDao {
         protectedEventCodes: List<String>,
     ): Int
 
+    @Query("SELECT COUNT(*) FROM diagnostic_events")
+    protected abstract suspend fun count(): Int
+
     @Query("SELECT * FROM diagnostic_events ORDER BY createdAtEpochMillis DESC, diagnosticId DESC LIMIT :limit")
     abstract suspend fun recent(limit: Int): List<DiagnosticEventEntity>
 
@@ -534,8 +646,9 @@ internal abstract class DiagnosticsDao {
         maxRows: Int,
         protectedEventCodes: List<String>,
         protectedMaxRows: Int,
-    ): Int =
-        deleteOlderThan(cutoffEpochMillis, protectedEventCodes) +
-            deleteOverflow(maxRows, protectedEventCodes) +
-            deleteProtectedOverflow(protectedMaxRows, protectedEventCodes)
+    ): Int {
+        val expired = deleteOlderThan(cutoffEpochMillis, protectedEventCodes)
+        val overflow = if (count() > maxRows) deleteOverflow(maxRows, protectedEventCodes) else 0
+        return expired + overflow + deleteProtectedOverflow(protectedMaxRows, protectedEventCodes)
+    }
 }

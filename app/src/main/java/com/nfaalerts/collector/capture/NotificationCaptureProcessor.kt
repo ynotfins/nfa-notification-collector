@@ -330,10 +330,12 @@ class DurableCaptureDispatcher(
     private val processor: suspend (DispatchedNotification) -> Unit,
     private val diagnostics: CaptureDispatchDiagnostics,
     private val timeoutMillis: Long = DISPATCH_TIMEOUT_MS,
+    private val pacer: CapturePacer = NoCapturePacing,
 ) : CaptureDispatcher {
     override fun dispatch(request: DispatchedNotification) {
         diagnostics.onDispatchStarted()
         try {
+            pacer.pace()
             val completed =
                 runBlocking {
                     withTimeoutOrNull(timeoutMillis) {

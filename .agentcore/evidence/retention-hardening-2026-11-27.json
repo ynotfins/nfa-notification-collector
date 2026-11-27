@@ -1,0 +1,73 @@
+{
+  "captured_at": "2026-11-27T14:48:00Z",
+  "project_key": "nfa-notification-collector",
+  "branch": "goal/retention-hardening",
+  "apk": {
+    "path": "app/build/outputs/apk/debug/app-debug.apk",
+    "sha256": "d27434ba23c2611f0094f8736565af5ce816b6c94d4122beced57b56a94f2144",
+    "bytes": 13848524,
+    "versionName": "0.2.0",
+    "versionCode": 2
+  },
+  "live_phone_policy_read_only": {
+    "serial": "R3GL605J0AH",
+    "model": "SM-S948U",
+    "installed_versionName": "0.2.0",
+    "installed_versionCode": 2,
+    "retention": { "sentDays": 180, "maxSentRows": 100000 },
+    "diagnostics": { "retentionDays": 90, "maxRows": 50000 },
+    "note": "Read-only config inspection via run-as. No install, uninstall, clear-data, force-stop, or connectedDebugAndroidTest on the primary phone."
+  },
+  "unit_tests": {
+    "task": ":app:testDebugUnitTest",
+    "result": "passed",
+    "new_suites": [
+      "CaptureBackpressureTest 4/4",
+      "StorageSnapshotTest 3/3",
+      "StorageFormatTest 1/1",
+      "CollectorConfigCodecTest 20/20",
+      "DiagnosticRepositoryTest 7/7"
+    ]
+  },
+  "static_checks": {
+    "ktlintCheck": "passed",
+    "lintDebug": "passed"
+  },
+  "emulator": {
+    "serial": "emulator-5554",
+    "avd": "Pixel_8_API_36",
+    "api": 36,
+    "note": "Instrumented tests were invoked with am instrument -s emulator-5554, never connectedDebugAndroidTest."
+  },
+  "instrumented": {
+    "RetentionMaintenanceInstrumentedTest": "4/4 passed",
+    "RetentionSoakInstrumentedTest": "1/1 passed",
+    "DeliveryDatabaseInstrumentedTest retention + diagnostics + migration 4-5": "3/3 passed",
+    "CollectorHomeScreenInstrumentedTest": "17/17 passed"
+  },
+  "purge_100k_to_10k": {
+    "deleted_sent_rows": 90000,
+    "batches": 900,
+    "batch_size": 100,
+    "duration_ms": 36808,
+    "max_capture_insert_latency_ms": 44,
+    "capture_block_budget_ms": 250,
+    "result": "passed",
+    "notes": "Bulk delete per batch, 5 ms pause between batches, IO dispatcher. Unsent rows untouched; tombstones consistent; second pass deleted 0."
+  },
+  "compressed_72h_soak": {
+    "posts": 7200,
+    "posts_per_hour": 100,
+    "retained_sent_rows": 1000,
+    "tombstones": 6200,
+    "p95_post_to_room_ms": 2,
+    "max_post_to_room_ms": 7,
+    "already_posted_or_enqueued_50_lines": 0,
+    "result": "passed",
+    "notes": "Compressed simulation, not a wall-clock 72-hour soak."
+  },
+  "wall_clock_72h_soak": {
+    "status": "not_run",
+    "reason": "No 72-hour wall-clock window in this session; requires a secondary device or emulator held for 72 hours."
+  }
+}

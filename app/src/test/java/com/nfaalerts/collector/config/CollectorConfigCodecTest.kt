@@ -27,10 +27,59 @@ class CollectorConfigCodecTest {
         assertEquals(21_600_000L, document.config.delivery.maxBackoffMs)
         assertEquals(180, document.config.retention.sentDays)
         assertEquals(100_000, document.config.retention.maxSentRows)
+        assertEquals(50_000, document.config.retention.pressureMaxRows)
+        assertEquals(200L * 1024L * 1024L, document.config.retention.pressureMaxBytes)
+        assertEquals(5_000, document.config.retention.backpressureUnsentRows)
+        assertEquals(250L, document.config.retention.backpressureDelayMs)
         assertEquals(90, document.config.diagnostics.retentionDays)
         assertEquals(50_000, document.config.diagnostics.maxRows)
         assertEquals(10, document.config.shade.keepNewestPerPackage)
         assertFalse(document.root.toString().contains("maxAttempts"))
+    }
+
+    @Test
+    fun retentionPressureAndBackpressureDefaultsApplyToOlderConfigs() {
+        val legacy =
+            """
+            {"configVersion":1,"sources":[],"retention":{"sentDays":10,"maxSentRows":10000}}
+            """.trimIndent().encodeToByteArray()
+
+        val config = (codec.decode(legacy) as ConfigDecodeResult.Valid).document.config.retention
+
+        assertEquals(10, config.sentDays)
+        assertEquals(10_000, config.maxSentRows)
+        assertEquals(50_000, config.pressureMaxRows)
+        assertEquals(200L * 1024L * 1024L, config.pressureMaxBytes)
+        assertEquals(5_000, config.backpressureUnsentRows)
+        assertEquals(250L, config.backpressureDelayMs)
+    }
+
+    @Test
+    fun retentionPressureAndBackpressureAreValidated() {
+        val payload =
+            """
+            {
+              "configVersion":1,
+              "sources":[],
+              "retention":{
+                "sentDays":180,
+                "maxSentRows":100000,
+                "pressureMaxRows":0,
+                "pressureMaxBytes":0,
+                "backpressureUnsentRows":-1,
+                "backpressureDelayMs":6000
+              }
+            }
+            """.trimIndent().encodeToByteArray()
+
+        val errors = (codec.decode(payload) as ConfigDecodeResult.Invalid).errors
+
+        assertTrue(errors.any { it.path == "/retention/pressureMaxRows" && it.code == "POSITIVE_INTEGER_REQUIRED" })
+        assertTrue(errors.any { it.path == "/retention/pressureMaxBytes" && it.code == "RETENTION_RANGE" })
+        assertTrue(
+            errors.any { it.path == "/retention/backpressureUnsentRows" && it.code == "POSITIVE_INTEGER_REQUIRED" },
+        )
+        assertTrue(errors.any { it.path == "/retention/backpressureDelayMs" && it.code == "RETENTION_RANGE" })
     }
 
     @Test

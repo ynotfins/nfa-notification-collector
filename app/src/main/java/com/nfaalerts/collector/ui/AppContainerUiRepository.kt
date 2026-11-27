@@ -13,6 +13,7 @@ import com.nfaalerts.collector.config.SourceSelection
 import com.nfaalerts.collector.config.SourceSelectionRepository
 import com.nfaalerts.collector.data.CollectorStatusAggregate
 import com.nfaalerts.collector.data.DeliveryState
+import com.nfaalerts.collector.retention.StorageSnapshot
 import com.nfaalerts.collector.security.BearerLoadState
 import com.nfaalerts.collector.ui.settings.SettingsDraft
 import kotlinx.coroutines.CoroutineScope
@@ -87,8 +88,8 @@ class AppContainerUiRepository internal constructor(
             )
         }
     private val coreWithRuntime =
-        combine(coreState, container.lastDrainAt) { core, lastDrainAt ->
-            core.copy(lastDrainAt = lastDrainAt)
+        combine(coreState, container.lastDrainAt, container.storageFacts) { core, lastDrainAt, storage ->
+            core.copy(lastDrainAt = lastDrainAt, storage = storage)
         }
 
     override val state: StateFlow<CollectorUiSnapshot> =
@@ -158,6 +159,8 @@ class AppContainerUiRepository internal constructor(
                 notificationAccessLabel = access.label(),
                 recentsLocked = document.config.reliability.recentsLocked,
                 totalCount = facts.totalCount,
+                storageRowCount = core.storage.capturedRows,
+                storageDatabaseBytes = core.storage.databaseBytes,
                 queueCountsByState = facts.countsByState,
                 serverReceivedAt = facts.lastServerReceivedAt ?: "Unknown",
                 verificationComplete = verificationComplete,
@@ -564,4 +567,5 @@ private data class CoreUiState(
     val config: UiConfigState?,
     val bearer: BearerUiState?,
     val lastDrainAt: Long? = null,
+    val storage: StorageSnapshot = StorageSnapshot(0, 0, 0),
 )

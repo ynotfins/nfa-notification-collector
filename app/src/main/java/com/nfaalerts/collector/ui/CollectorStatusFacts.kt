@@ -2,6 +2,7 @@ package com.nfaalerts.collector.ui
 
 import com.nfaalerts.collector.data.CollectorStatusAggregate
 import com.nfaalerts.collector.data.DeliveryState
+import java.util.Locale
 
 data class CollectorStatusFacts(
     val totalCount: Long,
@@ -44,3 +45,15 @@ data class CollectorStatusFacts(
             )
     }
 }
+
+fun formatStorageBytes(bytes: Long): String =
+    when {
+        bytes >= GIB -> String.format(Locale.US, "%.1f GB", bytes / GIB.toDouble())
+        bytes >= MIB -> String.format(Locale.US, "%.1f MB", bytes / MIB.toDouble())
+        bytes >= KIB -> String.format(Locale.US, "%.1f KB", bytes / KIB.toDouble())
+        else -> "$bytes B"
+    }
+
+private const val KIB = 1024L
+private const val MIB = 1024L * KIB
+private const val GIB = 1024L * MIB
