@@ -116,6 +116,37 @@ class DeliveryDatabaseInstrumentedTest {
         }
 
     @Test
+    fun migrationFourToFiveAddsTheSentRetentionIndex() =
+        runBlocking {
+            migrationHelper.createDatabase(4).use { connection ->
+                connection.execSQL(
+                    """
+                    INSERT INTO captured_notifications
+                    VALUES ('indexed','pkg','bnn','key',1,NULL,10,20,'raw','{}','{}','sha',2,'LIVE')
+                    """.trimIndent(),
+                )
+                connection.execSQL(
+                    """
+                    INSERT INTO delivery_outbox
+                    VALUES ('indexed','SENT',1,NULL,NULL,NULL,NULL,NULL,20,202,NULL,
+                      '123e4567-e89b-12d3-a456-426614174000','2026-08-18T12:00:00Z','1.2.0',20,20)
+                    """.trimIndent(),
+                )
+            }
+
+            migrationHelper.runMigrationsAndValidate(5, listOf(NfaCollectorDatabase.MIGRATION_4_5)).use { connection ->
+                connection
+                    .prepare(
+                        "SELECT COUNT(*) FROM sqlite_master " +
+                            "WHERE type = 'index' AND name = 'index_delivery_outbox_state_sentAtEpochMillis'",
+                    ).use { statement ->
+                        assertTrue(statement.step())
+                        assertEquals(1, statement.getInt(0))
+                    }
+            }
+        }
+
+    @Test
     fun claimDueIsAtomicAndDatabaseTimeIsAuthoritative() =
         runBlocking {
             database = inMemoryDatabase()

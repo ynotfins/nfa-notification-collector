@@ -123,6 +123,31 @@ class DiagnosticRepositoryTest {
         }
 
     @Test
+    fun storagePressureReleaseRecordsBoundedNumericFacts() =
+        runBlocking {
+            val store = RecordingDiagnosticStore()
+            val repository = DiagnosticRepository(store, clock = { 77L }, idFactory = { "pressure-id" })
+
+            val result =
+                repository.record(
+                    "STORAGE_PRESSURE_PRUNED",
+                    mapOf(
+                        "pruned" to 450,
+                        "queue" to 1_050,
+                        "dbBytes" to 210_000_000L,
+                        "thresholdRows" to 50_000,
+                        "thresholdBytes" to 200_000_000L,
+                    ),
+                )
+
+            assertEquals(DiagnosticRecordResult.Recorded, result)
+            val details = store.rows.single().safeDetailsJson
+            assertTrue(details.contains("\"pruned\":450"))
+            assertTrue(details.contains("\"thresholdRows\":50000"))
+            assertFalse(details.contains("rawText"))
+        }
+
+    @Test
     fun objectAndArrayValuesAreRejectedRatherThanStringified() =
         runBlocking {
             val store = RecordingDiagnosticStore()

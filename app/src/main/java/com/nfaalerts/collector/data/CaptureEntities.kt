@@ -34,7 +34,10 @@ data class CapturedNotificationEntity(
             onDelete = ForeignKey.RESTRICT,
         ),
     ],
-    indices = [Index("state", "nextAttemptAtEpochMillis")],
+    indices = [
+        Index("state", "nextAttemptAtEpochMillis"),
+        Index("state", "sentAtEpochMillis"),
+    ],
 )
 data class DeliveryOutboxEntity(
     @PrimaryKey val eventId: String,

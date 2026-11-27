@@ -47,8 +47,8 @@ class DiagnosticRepository(
     private val store: DiagnosticStore,
     private val clock: () -> Long = System::currentTimeMillis,
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
-    private val retentionDays: Int = 14,
-    private val maxRows: Int = 2_000,
+    private val retentionDays: Int = 90,
+    private val maxRows: Int = 50_000,
     private val protectedEventCodes: Set<String> = PROTECTED_EVENT_CODES,
     private val protectedMaxRows: Int = PROTECTED_MAX_ROWS,
 ) {
@@ -127,6 +127,7 @@ class DiagnosticRepository(
             "source" -> value is String && SAFE_LOWER_TOKEN.matches(value)
             "attempt", "createdAt", "httpStatus", "nextAttemptAt", "queue" -> value is Number
             "active", "dismissed", "persisted", "remaining", "sent" -> value is Number
+            "dbBytes", "pruned", "thresholdBytes", "thresholdRows" -> value is Number
             else -> false
         }
 
@@ -156,6 +157,7 @@ class DiagnosticRepository(
                 "SOURCE_DEFAULT_RESTORED",
                 "STALE_SENDING_RECOVERED",
                 "CAPTURE_DROPPED",
+                "STORAGE_PRESSURE_PRUNED",
             )
 
         /**
@@ -176,6 +178,7 @@ class DiagnosticRepository(
                 "active",
                 "attempt",
                 "createdAt",
+                "dbBytes",
                 "dismissed",
                 "errorCode",
                 "eventId",
@@ -185,11 +188,14 @@ class DiagnosticRepository(
                 "nextAttemptAt",
                 "packageName",
                 "persisted",
+                "pruned",
                 "queue",
                 "remaining",
                 "sent",
                 "source",
                 "state",
+                "thresholdBytes",
+                "thresholdRows",
             )
         private val SENSITIVE_FRAGMENTS =
             setOf(

@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.ConnectivityManager
 import android.net.Network
 import com.nfaalerts.collector.capture.ActiveNotificationCatchUp
+import com.nfaalerts.collector.capture.CaptureBackpressure
 import com.nfaalerts.collector.capture.CaptureDropReason
 import com.nfaalerts.collector.capture.CapturePath
 import com.nfaalerts.collector.capture.DurableCaptureDispatcher
@@ -27,6 +28,7 @@ import com.nfaalerts.collector.config.ConfigLoadResult
 import com.nfaalerts.collector.config.DefaultSources
 import com.nfaalerts.collector.config.InstalledAppRepository
 import com.nfaalerts.collector.config.JsonSourceSelectionStore
+import com.nfaalerts.collector.config.RetentionConfig
 import com.nfaalerts.collector.config.SelectionLoadState
 import com.nfaalerts.collector.config.SelectionUpdate
 import com.nfaalerts.collector.config.SourceSelectionRepository
@@ -45,6 +47,8 @@ import com.nfaalerts.collector.delivery.RoomDeliveryStore
 import com.nfaalerts.collector.delivery.RuntimeDeliverySettings
 import com.nfaalerts.collector.diagnostics.DiagnosticRepository
 import com.nfaalerts.collector.diagnostics.RoomDiagnosticStore
+import com.nfaalerts.collector.retention.RetentionMaintenance
+import com.nfaalerts.collector.retention.StorageSnapshot
 import com.nfaalerts.collector.security.AndroidKeystoreBearerStore
 import com.nfaalerts.collector.security.BearerLoadState
 import kotlinx.coroutines.CancellationException
@@ -54,8 +58,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -66,6 +73,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
+import java.io.File
 import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
@@ -73,6 +81,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class NfaCollectorApp : Application() {
     lateinit var appContainer: AppContainer
@@ -124,6 +133,25 @@ class AppContainer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutableLastDrainAt = MutableStateFlow<Long?>(null)
     val lastDrainAt: StateFlow<Long?> = mutableLastDrainAt.asStateFlow()
+    private val unsentRows = AtomicLong(0)
+    private val persistedSincePressureCheck = AtomicLong(0)
+    private val pressureCheckRunning = AtomicBoolean(false)
+
+    @Volatile
+    private var cachedRetention = RetentionConfig(sentDays = 180, maxSentRows = 100_000)
+    val storageFacts: StateFlow<StorageSnapshot> =
+        flow {
+            while (true) {
+                val snapshot = retentionMaintenance.snapshot()
+                unsentRows.set(snapshot.unsentRows)
+                emit(snapshot)
+                delay(STORAGE_SAMPLE_INTERVAL_MS)
+            }
+        }.stateIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000),
+            initialValue = StorageSnapshot(0, 0, 0),
+        )
     val sourceSelections =
         SourceSelectionRepository(JsonSourceSelectionStore(configStore, application.applicationContext))
     val installedApps = InstalledAppRepository(application.packageManager)
@@ -143,6 +171,8 @@ class AppContainer(
 
     private val database: NfaCollectorDatabase by lazy(databaseFactory)
     private val diagnostics by lazy { DiagnosticRepository(RoomDiagnosticStore(database.diagnosticsDao())) }
+    private val retentionMaintenance by lazy { RetentionMaintenance(database, ::databaseSizeBytes) }
+    private val captureBackpressure = CaptureBackpressure({ unsentRows.get() }, { cachedRetention })
     internal val bearerStore = AndroidKeystoreBearerStore(application.applicationContext)
     private val deliveryStore by lazy { RoomDeliveryStore(database) }
     private val ingestClient =
@@ -160,7 +190,10 @@ class AppContainer(
             transport = IngestTransport(ingestClient::send),
             scheduler = deliveryScheduler,
             paceLimiter = DrainPaceLimiter(),
-            onDelivered = { requestShadeHygiene() },
+            onDelivered = {
+                unsentRows.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+                requestShadeHygiene()
+            },
         )
     }
     private val contractSync by lazy {
@@ -192,6 +225,7 @@ class AppContainer(
                 DurableCaptureDispatcher(
                     processor = captureProcessor::process,
                     diagnostics = listenerStatus,
+                    pacer = captureBackpressure,
                 ),
             initializationDiagnostics = listenerStatus,
             dropLedger = ::noteCaptureDrop,
@@ -346,6 +380,7 @@ class AppContainer(
             sourceSelections.load()
             restoreDefaultSources()
             refreshShadePolicy()
+            refreshRetentionConfig()
             postedNotificationCallback.onSelectionLoadCompleted()
             runCatching { contractSync.maybeCheck(force = true) }
             recoverDeliveryOnStartup()
@@ -372,6 +407,7 @@ class AppContainer(
 
     suspend fun onRelevantConfigurationChanged() {
         refreshShadePolicy()
+        refreshRetentionConfig()
         val now = clock()
         relevantRevision()?.let { database.deliveryDao().requeuePausedAuth(it, now) }
         database.deliveryDao().nextDueAtEpochMillis()?.let(deliveryScheduler::ensureScheduled)
@@ -461,16 +497,11 @@ class AppContainer(
 
     suspend fun runDeliveryMaintenance() {
         val document = loadConfigDocument().first
-        val now = clock()
-        val sentCutoff =
-            now -
-                TimeUnit.DAYS.toMillis(
-                    document.config.retention.sentDays
-                        .toLong(),
-                )
-        database.retentionDao().pruneSent(sentCutoff, document.config.retention.maxSentRows, now)
+        cachedRetention = document.config.retention
+        retentionMaintenance.runScheduled(document.config.retention)
+        unsentRows.set(database.captureReadDao().unsentCount().toLong())
         val diagnosticCutoff =
-            now -
+            clock() -
                 TimeUnit.DAYS.toMillis(
                     document.config.diagnostics.retentionDays
                         .toLong(),
@@ -483,6 +514,40 @@ class AppContainer(
                 DiagnosticRepository.PROTECTED_EVENT_CODES.toList(),
                 DiagnosticRepository.PROTECTED_MAX_ROWS,
             )
+        checkStoragePressure()
+    }
+
+    private suspend fun refreshRetentionConfig() {
+        cachedRetention = loadConfigDocument().first.config.retention
+    }
+
+    private suspend fun checkStoragePressure() {
+        if (!pressureCheckRunning.compareAndSet(false, true)) return
+        try {
+            val retention = loadConfigDocument().first.config.retention
+            cachedRetention = retention
+            val release = retentionMaintenance.releasePressureIfNeeded(retention) ?: return
+            runCatching {
+                diagnostics.record(
+                    "STORAGE_PRESSURE_PRUNED",
+                    mapOf(
+                        "pruned" to release.deletedSentRows,
+                        "queue" to release.after.capturedRows,
+                        "dbBytes" to release.after.databaseBytes,
+                        "thresholdRows" to retention.pressureMaxRows,
+                        "thresholdBytes" to retention.pressureMaxBytes,
+                    ),
+                )
+            }
+            unsentRows.set(database.captureReadDao().unsentCount().toLong())
+        } finally {
+            pressureCheckRunning.set(false)
+        }
+    }
+
+    private fun databaseSizeBytes(): Long {
+        val path = appContext.getDatabasePath(NfaCollectorDatabase.DATABASE_NAME)
+        return listOf(path, File("${path.path}-wal"), File("${path.path}-shm")).sumOf(File::length)
     }
 
     private fun startImmediateDeliveryAfterPersist(
@@ -492,6 +557,13 @@ class AppContainer(
     ) {
         val now = clock()
         deliveryScheduler.ensureScheduled(now)
+        unsentRows.incrementAndGet()
+        if (persistedSincePressureCheck.incrementAndGet() >= PRESSURE_CHECK_EVERY_ROWS) {
+            persistedSincePressureCheck.set(0)
+            scope.launch(Dispatchers.IO) {
+                runCatching { checkStoragePressure() }
+            }
+        }
         scope.launch(Dispatchers.IO) {
             runCatching {
                 diagnostics.record(
@@ -710,6 +782,8 @@ class AppContainer(
         const val SELECTION_READY_POLL_MS = 20L
         const val SHADE_RECOUNT_SETTLE_MS = 250L
         const val ALLOWLIST_AGGREGATE_INTERVAL_MS = 5 * 60_000L
+        const val STORAGE_SAMPLE_INTERVAL_MS = 15_000L
+        const val PRESSURE_CHECK_EVERY_ROWS = 500L
         val DIAGNOSTIC_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+")
     }
 }

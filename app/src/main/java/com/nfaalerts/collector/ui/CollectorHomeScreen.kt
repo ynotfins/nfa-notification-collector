@@ -413,7 +413,13 @@ private fun LazyListScope.statusFacts(snapshot: CollectorUiSnapshot) {
     item { Text("Sendable now: ${snapshot.sendableCount}") }
     item { Text("Held (blocked): ${snapshot.heldBlockedCount}") }
     item { Text("Needs fix (quarantine): ${snapshot.heldQuarantinedCount}") }
-    item { Text("Captured total: ${snapshot.totalCount}") }
+    item {
+        Text("Captured total: ${snapshot.totalCount}")
+        Text(
+            "Local database: ${snapshot.storageRowCount} rows · " +
+                formatStorageBytes(snapshot.storageDatabaseBytes),
+        )
+    }
     snapshot.queueCountsByState.forEach { (state, count) ->
         val label =
             when (state) {

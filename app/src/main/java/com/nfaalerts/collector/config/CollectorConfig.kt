@@ -39,7 +39,18 @@ data class DeliveryConfig(
 data class RetentionConfig(
     val sentDays: Int,
     val maxSentRows: Int,
-)
+    val pressureMaxRows: Int = DEFAULT_PRESSURE_MAX_ROWS,
+    val pressureMaxBytes: Long = DEFAULT_PRESSURE_MAX_BYTES,
+    val backpressureUnsentRows: Int = DEFAULT_BACKPRESSURE_UNSENT_ROWS,
+    val backpressureDelayMs: Long = DEFAULT_BACKPRESSURE_DELAY_MS,
+) {
+    companion object {
+        const val DEFAULT_PRESSURE_MAX_ROWS = 50_000
+        const val DEFAULT_PRESSURE_MAX_BYTES = 200L * 1024L * 1024L
+        const val DEFAULT_BACKPRESSURE_UNSENT_ROWS = 5_000
+        const val DEFAULT_BACKPRESSURE_DELAY_MS = 250L
+    }
+}
 
 data class DiagnosticsConfig(
     val retentionDays: Int,
@@ -198,6 +209,10 @@ class CollectorConfigCodec {
                         RetentionConfig(
                             sentDays = retention.getValue("sentDays").jsonPrimitive.int,
                             maxSentRows = retention.getValue("maxSentRows").jsonPrimitive.int,
+                            pressureMaxRows = retention.getValue("pressureMaxRows").jsonPrimitive.int,
+                            pressureMaxBytes = retention.getValue("pressureMaxBytes").jsonPrimitive.long,
+                            backpressureUnsentRows = retention.getValue("backpressureUnsentRows").jsonPrimitive.int,
+                            backpressureDelayMs = retention.getValue("backpressureDelayMs").jsonPrimitive.long,
                         ),
                     diagnostics =
                         DiagnosticsConfig(
@@ -327,6 +342,17 @@ class CollectorConfigCodec {
         }
         validatePositiveInt(root, "retention", "sentDays", errors)
         validatePositiveInt(root, "retention", "maxSentRows", errors)
+        validatePositiveInt(root, "retention", "pressureMaxRows", errors)
+        validatePositiveInt(root, "retention", "backpressureUnsentRows", errors)
+        validateLongRange(root, "retention", "pressureMaxBytes", 1L..MAX_PRESSURE_BYTES, errors, "RETENTION_RANGE")
+        validateLongRange(
+            root,
+            "retention",
+            "backpressureDelayMs",
+            0L..MAX_BACKPRESSURE_DELAY_MS,
+            errors,
+            "RETENTION_RANGE",
+        )
         validatePositiveInt(root, "diagnostics", "retentionDays", errors)
         validatePositiveInt(root, "diagnostics", "maxRows", errors)
         validateIntRange(root, "shade", "keepNewestPerPackage", 1..MAX_KEEP_NEWEST_PER_PACKAGE, errors)
@@ -339,14 +365,19 @@ class CollectorConfigCodec {
         key: String,
         range: LongRange,
         errors: MutableList<ConfigValidationError>,
+        code: String = "DELIVERY_RANGE",
     ): Long? {
         val value = ((root[section] as? JsonObject)?.get(key) as? JsonPrimitive)?.longOrNull
         if (value == null || value !in range) {
             errors +=
                 ConfigValidationError(
                     "/$section/$key",
-                    "DELIVERY_RANGE",
-                    "Value is outside the supported delivery range.",
+                    code,
+                    if (code == "DELIVERY_RANGE") {
+                        "Value is outside the supported delivery range."
+                    } else {
+                        "Value is outside the supported retention range."
+                    },
                 )
         }
         return value
@@ -587,7 +618,16 @@ class CollectorConfigCodec {
         result["delivery"] = mergeKnownObject(defaultDelivery, result["delivery"])
         result["retention"] =
             mergeKnownObject(
-                JsonObject(mapOf("maxSentRows" to JsonPrimitive(100_000), "sentDays" to JsonPrimitive(180))),
+                JsonObject(
+                    mapOf(
+                        "maxSentRows" to JsonPrimitive(100_000),
+                        "sentDays" to JsonPrimitive(180),
+                        "pressureMaxRows" to JsonPrimitive(RetentionConfig.DEFAULT_PRESSURE_MAX_ROWS),
+                        "pressureMaxBytes" to JsonPrimitive(RetentionConfig.DEFAULT_PRESSURE_MAX_BYTES),
+                        "backpressureUnsentRows" to JsonPrimitive(RetentionConfig.DEFAULT_BACKPRESSURE_UNSENT_ROWS),
+                        "backpressureDelayMs" to JsonPrimitive(RetentionConfig.DEFAULT_BACKPRESSURE_DELAY_MS),
+                    ),
+                ),
                 result["retention"],
             )
         result["diagnostics"] =
@@ -683,6 +723,8 @@ class CollectorConfigCodec {
         const val MAX_KEEP_NEWEST_PER_PACKAGE = 30
         private const val LEGACY_PROFILE = "legacy"
         private const val MAX_BACKOFF_MS = 21_600_000L
+        private const val MAX_PRESSURE_BYTES = 10L * 1024L * 1024L * 1024L
+        private const val MAX_BACKPRESSURE_DELAY_MS = 5_000L
         private val SUPPORTED_THEMES = setOf("primary-light", "secondary-light", "primary-dark", "secondary-dark")
         private val DEVICE_ID = Regex("[A-Za-z0-9._:-]{1,128}")
         private val BEARER_TOKEN_SHAPE = Regex("[A-Za-z0-9_-]{43}")

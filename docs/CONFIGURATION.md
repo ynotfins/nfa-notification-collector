@@ -24,7 +24,11 @@ The implementation must define a versioned `collector-config.json` with at least
   },
   "retention": {
     "sentDays": 180,
-    "maxSentRows": 100000
+    "maxSentRows": 100000,
+    "pressureMaxRows": 50000,
+    "pressureMaxBytes": 209715200,
+    "backpressureUnsentRows": 5000,
+    "backpressureDelayMs": 250
   },
   "diagnostics": {
     "retentionDays": 90,
@@ -42,6 +46,12 @@ The implementation must define a versioned `collector-config.json` with at least
 Values are a design baseline, not dependency/source-server authorization. The Plan-mode spec defines exact validation ranges and migrations.
 
 `shade.keepNewestPerPackage` (1–30, default 10) is how many of the newest notifications per selected package stay visible. Older notifications are dismissed only after their Room row is `SENT`; a cap guard at 40 dismisses persisted rows down to this number. See `docs/PRODUCT_REQUIREMENTS.md` §Shade hygiene.
+
+`retention` controls local capture storage. `sentDays`/`maxSentRows` bound `SENT` history (default
+180 days / 100,000 rows). `pressureMaxRows`/`pressureMaxBytes` trigger immediate oldest-`SENT`
+pruning before the scheduled pass (default 50,000 rows / 200 MiB). `backpressureUnsentRows` and
+`backpressureDelayMs` pace new capture writes when the unsent outbox is large (default 5,000 rows /
+250 ms, capped at 1,000 ms). Unsent rows are never pruned. See `docs/RETENTION-AND-STORAGE.md`.
 
 ## Atomic last-known-good behavior
 

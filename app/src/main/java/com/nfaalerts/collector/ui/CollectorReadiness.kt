@@ -104,6 +104,8 @@ data class CollectorUiSnapshot(
     val notificationAccessLabel: String = "Unknown",
     val recentsLocked: Boolean = false,
     val totalCount: Long = 0,
+    val storageRowCount: Long = 0,
+    val storageDatabaseBytes: Long = 0,
     val queueCountsByState: Map<DeliveryState, Long> = emptyMap(),
     val serverReceivedAt: String = "Unknown",
     val verificationComplete: Boolean = false,
